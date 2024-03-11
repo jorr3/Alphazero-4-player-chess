@@ -41,6 +41,15 @@ class Move:
 
         self.to_row, self.to_col = self.to_default_perspective(end_row, end_col, board_size, player)
 
+    def __str__(self):
+        from_col_letter = chr(self.from_col + ord('a'))
+        to_col_letter = chr(self.to_col + ord('a'))
+
+        from_row_number = 14 - self.from_row
+        to_row_number = 14 - self.to_row
+
+        return f"Move: {from_col_letter}{from_row_number} -> {to_col_letter}{to_row_number}"
+
     def to_cpp(self):
         start_location = BoardLocation(self.from_row, self.from_col)
         end_location = BoardLocation(self.to_row, self.to_col)
@@ -52,9 +61,9 @@ class Move:
         """
         Convert coordinates to the perspective of player 0.
         """
-        # Rotate 90 degrees clockwise for each player color value
         for _ in range(color_value(player.GetColor())):
-            row, col = col, board_size - 1 - row
+            # row, col = col, board_size - 1 - row
+            row, col = board_size - 1 - col, row
         return row, col
 
     @staticmethod

@@ -37,6 +37,7 @@ class Node:
         )
 
         return self.children[best_child_index] if best_child_index != -1 else None
+
     def expand(self, policy):
         non_zero_indices = torch.nonzero(policy, as_tuple=True)
         non_zero_values = policy[non_zero_indices]
@@ -50,8 +51,6 @@ class Node:
             child_state = self.game.take_action(self.state, action, self.turn)
             child = Node(self.game, self.args, child_state, child_turn, self, action, prob)
             self.children.append(child)
-
-        return self.children[-1]
 
     def backpropagate(self, value):
         self.value_sum += value

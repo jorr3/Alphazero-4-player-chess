@@ -1,6 +1,8 @@
 import numpy as np
 import torch
 
+from chessenv import Player, PlayerColor
+
 from node import Node
 
 class MCTS:
@@ -45,11 +47,8 @@ class MCTS:
             self.update_with_neural_net_predictions(non_terminal_games)
 
     def execute_search_steps(self, games):
-        non_terminal_games = []
-        for game in games:
-            if self.step_through_game(game):
-                non_terminal_games.append(game)
-        return non_terminal_games
+        """Steps through the games until a terminal state is reached. Returns the non-terminal games."""
+        return [game for game in games if self.step_through_game(game)]
 
     def step_through_game(self, game):
         node = game.root

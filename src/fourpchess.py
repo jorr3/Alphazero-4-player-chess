@@ -1,3 +1,6 @@
+import sys
+from typing import Tuple
+
 import torch
 import re
 from chessenv import (
@@ -10,9 +13,12 @@ from chessenv import (
     Player,
 )
 
-from alphazero_implementation.IGame import IGame
+from alphazero_implementation.igame import IGame
 from fen_parser import parse_board_from_fen
 from move import Move
+from four_player_chess_interface import FourPlayerChessInterface
+
+from line_profiler_pycharm import profile
 
 
 class FourPlayerChess(IGame):
@@ -35,19 +41,8 @@ class FourPlayerChess(IGame):
         pass
 
     @classmethod
-    def take_action(cls, state, action: Move, player):
+    def take_action(cls, state, action: Move, player, verbose=False):
         """Takes action and returns the game state post-action."""
-        legal_moves = [
-            (
-                (move.From().GetRow(), move.From().GetCol()),
-                (move.To().GetRow(), move.To().GetCol()),
-            )
-            for move in state.GetLegalMoves()
-        ]
-        py_action = ((action.from_row, action.from_col), (action.to_row, action.to_col))
-        if py_action not in legal_moves:
-            print("kkr")
-
         state_copy = Board(state)
         state_copy.MakeMove(action.to_cpp())
         return state_copy
@@ -80,21 +75,22 @@ class FourPlayerChess(IGame):
         return col, cls.board_size - 1 - row
 
     @classmethod
-    def get_terminated(cls, state, turn: Player) -> tuple[bool, float]:
+    def get_terminated(cls, state, last_player_to_make_move: Player) -> tuple[bool, None] | tuple[bool, float]:
         """Returns if the game is over and the value of the current state."""
         terminal_value_map = {
             GameResult.STALEMATE: 0.0,
-            GameResult.WIN_RY: 1.0
-            if turn.GetColor() in [PlayerColor.RED, PlayerColor.YELLOW]
-            else -1.0,
-            GameResult.WIN_BG: 1.0
-            if turn.GetColor() in [PlayerColor.BLUE, PlayerColor.GREEN]
-            else -1.0,
+            GameResult.WIN_RY: 1.0 if last_player_to_make_move.GetColor() in [PlayerColor.RED, PlayerColor.YELLOW] else -1.0,
+            GameResult.WIN_BG: 1.0 if last_player_to_make_move.GetColor() in [PlayerColor.BLUE, PlayerColor.GREEN] else -1.0,
         }
 
         result_state = state.GetGameResult()
 
         if result_state == GameResult.IN_PROGRESS:
+            if len(state.GetLegalMoves()) == 0:
+                ui = FourPlayerChessInterface()
+                ui.draw_board_state(state)
+                return True, terminal_value_map[GameResult.STALEMATE]
+
             return False, None
 
         return True, terminal_value_map[result_state]
@@ -112,6 +108,7 @@ class FourPlayerChess(IGame):
 
     # TODO: add attacked squares to the state representation
     @classmethod
+    @profile
     def get_encoded_states(cls, states: list, device: str) -> torch.Tensor:
         """Returns an encoded representation of the game state for neural network inputs."""
         batch_size = len(states)

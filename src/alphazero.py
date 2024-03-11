@@ -2,8 +2,9 @@ import random
 import wandb
 import torch
 import torch.nn.functional as F
+import pygame
 
-from alphazero_implementation.IGame import IGame
+from alphazero_implementation.igame import IGame
 from alphazero_implementation.mcts import MCTS
 from alphazero_implementation.move import Move
 from alphazero_implementation.net import ResNet
@@ -11,15 +12,19 @@ from alphazero_implementation.fourpchess import FourPlayerChess
 from typing import Type
 from tqdm import trange
 from chessenv import Player, PlayerColor
+from four_player_chess_interface import FourPlayerChessInterface
 
 
 class AlphaZero:
-    def __init__(self, model, optimizer, gameType: Type[IGame], args):
+    def __init__(self, model, optimizer, gameType: Type[IGame], args, visualize=False):
         self.model = model
         self.optimizer = optimizer
         self.gameType = gameType
         self.args = args
         self.mcts = MCTS(gameType, model, args)
+        self.visualize = visualize
+        if self.visualize:
+            self.ui = FourPlayerChessInterface()
 
     def selfPlay(self):
         return_memory = []
@@ -28,13 +33,18 @@ class AlphaZero:
         games = [self.gameType() for _ in range(self.args['num_parallel_games'])]
 
         while len(games) > 0 and game_length < self.args['max_game_length']:
-            # print(games[0].state)
-            # print("\n")
+
+            if self.visualize:
+                self.ui.draw_board_state(games[0].state)
+
             states = [g.state for g in games]
 
             self.mcts.search(states, games, player)
 
             for i in range(len(games))[::-1]:
+                if self.visualize:
+                    pygame.event.get()
+
                 game = games[i]
 
                 action_probs = torch.zeros(self.gameType.action_space_size, device=self.model.device)
@@ -46,11 +56,12 @@ class AlphaZero:
 
                 temperature_action_probs = torch.pow(action_probs, 1 / self.args['temperature'])
                 temperature_action_probs /= temperature_action_probs.sum()
-                action = torch.multinomial(temperature_action_probs, 1).item()
+                action_index = torch.multinomial(temperature_action_probs, 1).item()
+                action = Move(action_index, self.gameType.board_size, player)
 
-                game.state = self.gameType.take_action(game.state, Move(action, self.gameType.board_size), player)
+                game.state = self.gameType.take_action(game.state, action, player, True)
 
-                is_terminal, terminal_value = self.gameType.get_terminated(game.state)
+                is_terminal, terminal_value = self.gameType.get_terminated(game.state, player)
 
                 if is_terminal:
                     for hist_neutral_state, hist_action_probs, hist_player in game.memory:
@@ -68,9 +79,6 @@ class AlphaZero:
 
         return return_memory
 
-    import random
-    import torch
-    import torch.nn.functional as F
 
     def train(self, memory):
         random.shuffle(memory)
@@ -118,7 +126,7 @@ if __name__ == "__main__":
 
 
     # wandb.init(project="chess_training", name="AlphaZero Chess")
-    # time.sleep(5)
+    import time
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -131,16 +139,16 @@ if __name__ == "__main__":
     args = {
         'max_game_length': 40,
         'C': 2,
-        'num_searches': 100,
+        'num_searches': 50,
         'num_iterations': 100,
-        'num_selfPlay_iterations': 1,
-        'num_parallel_games': 1,
-        'num_epochs': 5,
+        'num_selfPlay_iterations': 20,
+        'num_parallel_games': 20,
+        'num_epochs': 4,
         'batch_size': 128,
         'temperature': 1.25,
         'dirichlet_epsilon': 0.25,
         'dirichlet_alpha': 0.3
     }
 
-    alphaZero = AlphaZero(model, optimizer, gameType, args)
+    alphaZero = AlphaZero(model, optimizer, gameType, args, visualize=False)
     alphaZero.learn()
