@@ -1,6 +1,6 @@
 import torch
 
-from alphazero_implementation.move import Move
+from src.move import Move
 from algos import select_child
 
 

@@ -2,6 +2,7 @@ import numpy as np
 from chessenv import BoardLocation, Move as CppMove, PlayerColor, color_value, Player
 
 
+
 class Move:
     queen_move_offsets = [
         (0, 1), (1, 1), (1, 0), (1, -1),

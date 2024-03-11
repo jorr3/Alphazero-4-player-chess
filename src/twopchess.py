@@ -6,9 +6,9 @@ import torch
 import wandb
 import chess.engine
 
-from alphazero_implementation.igame import IGame
-from alphazero_implementation.node import Node
-from alphazero_implementation.move import Move
+from src.igame import IGame
+from src.node import Node
+from src.move import Move
 from dualingDQN.agent import Agent
 from utils import profile
 
