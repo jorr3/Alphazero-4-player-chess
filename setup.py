@@ -5,36 +5,35 @@ from glob import glob
 import shutil
 import os
 
-
 class CustomBuildExt(build_ext):
-    def initialize_options(self):
-        super().initialize_options()
-        self.build_lib = './venv'
+    def build_extension(self, ext):
+        super().build_extension(ext)
 
-    def run(self):
-        super().run()
+        # Define the target directory for the moved files
+        target_dir = os.path.abspath('./venv')
+        os.makedirs(target_dir, exist_ok=True)
 
-        new_file_locations = {
-            'vc140.pdb': 'venv/algos.pyd',
-            'chessenv.cp311-win_amd64.pyd': 'venv/chessenv.pyd',
-            "algos.cp311-win_amd64.pyd": "venv/algos.pyd"
-        }
+        # Determine the original and new file paths
+        original_path = self.get_ext_fullpath(ext.name)
+        new_file_name = ext.name.split('.')[0] + os.path.splitext(original_path)[-1]
+        new_path = os.path.join(target_dir, new_file_name)
 
-        for src_filename, dst_filename in new_file_locations.items():
-            src_filepath = os.path.join(self.build_lib, src_filename)
-            dst_filepath = os.path.join(self.build_lib, dst_filename)
+        # Move the file, then explicitly check and remove the original if it still exists
+        shutil.move(original_path, new_path)
+        print(f"Moved {original_path} to {new_path}")
 
-            if os.path.exists(src_filepath):
-                shutil.move(src_filepath, dst_filepath)
-                os.remove(src_filename)
+        # Check if the original file still exists for some reason and remove it explicitly
+        if os.path.exists(original_path):
+            os.remove(original_path)
+            print(f"Explicitly removed the original file: {original_path}")
 
 
 source_files = sorted(glob("./engine/*.cc"))
 
 ext_modules = [
-Pybind11Extension(
+    Pybind11Extension(
         'algos',
-        sources=['./alphazero/cpp_algorithm_implementations/algos.cpp'],
+        sources=['./src/cpp_algorithm_implementations/algos.cpp'],
         include_dirs=[pybind11.get_include()],
         language='c++',
         extra_compile_args=['/std:c++latest']
@@ -56,4 +55,5 @@ setup(
     cmdclass={"build_ext": CustomBuildExt},
 )
 
-# command: python setup.py build_ext --inplace
+
+# build command: python setup.py build_ext --inplace
