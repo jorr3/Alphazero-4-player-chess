@@ -1,7 +1,6 @@
 import numpy as np
 import torch
 
-from chessenv import Player, PlayerColor
 
 from node import Node
 
@@ -14,7 +13,8 @@ class MCTS:
     @torch.no_grad()
     def search(self, states, games, player):
         encoded_states = self.gameType.get_encoded_states(states, self.neural_net.device)
-        root_policy = self.get_root_policy(encoded_states)
+        flat_root_policy = self.get_root_policy(encoded_states)
+        root_policy = self.gameType.parse_actionspace(flat_root_policy, states[0].GetTurn(), self.neural_net.device)
         self.initialize_games(games, states, root_policy, player)
 
         for _ in range(self.args['num_searches']):
@@ -34,10 +34,13 @@ class MCTS:
         return (1 - dirichlet_epsilon) * policy + dirichlet_epsilon * noise
 
     def initialize_games(self, games, states, root_policy, player):
+        legal_actions_masks = self.gameType.get_legal_actions_mask(states, self.neural_net.device)
+        game_policies = root_policy * legal_actions_masks
+        num_dims = tuple(range(1, len(self.gameType.state_space_dims) + 1))
+        game_policies /= torch.sum(game_policies, dim=num_dims, keepdim=True)
+
         for i, game in enumerate(games):
-            legal_actions_mask = self.gameType.get_legal_actions_mask(states[i], self.neural_net.device)
-            game_policy = root_policy[i] * legal_actions_mask
-            game_policy /= torch.sum(game_policy)
+            game_policy = game_policies[i]
             game.root = Node(self.gameType, self.args, states[i], player, visit_count=1)
             game.root.expand(game_policy)
 
@@ -64,16 +67,22 @@ class MCTS:
 
     def update_with_neural_net_predictions(self, games):
         states = [game.node.state for game in games]
-        policy, value = self.neural_net(self.gameType.get_encoded_states(states, self.neural_net.device))
-        policy = torch.softmax(policy, dim=1)
+        encoded_states = self.gameType.get_encoded_states(states, self.neural_net.device)
+        flat_policy, value = self.neural_net(encoded_states)
+        flat_policy = torch.softmax(flat_policy, dim=1)
+
+        policy = self.gameType.parse_actionspace(flat_policy, states[0].GetTurn(), self.neural_net.device)
+
+        valid_moves_mask = self.gameType.get_legal_actions_mask(states, self.neural_net.device)
+        policy *= valid_moves_mask
+        num_dims = tuple(range(1, len(self.gameType.state_space_dims) + 1))
+        policy = policy / torch.sum(policy, dim=num_dims, keepdim=True)
+
+        non_zero_indices = torch.nonzero(policy, as_tuple=True)
+        probs = policy[non_zero_indices]
 
         for i, game in enumerate(games):
             node = game.node
-            game_policy = self.apply_legal_actions_mask(policy[i], node.state, self.neural_net.device)
-            node.expand(game_policy)
+            node.expand(policy[i])
             node.backpropagate(value[i])
 
-    def apply_legal_actions_mask(self, policy, state, device):
-        valid_moves = self.gameType.get_legal_actions_mask(state, device)
-        policy *= valid_moves
-        return policy / torch.sum(policy)

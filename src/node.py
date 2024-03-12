@@ -39,18 +39,18 @@ class Node:
         return self.children[best_child_index] if best_child_index != -1 else None
 
     def expand(self, policy):
-        non_zero_indices = torch.nonzero(policy, as_tuple=True)
-        non_zero_values = policy[non_zero_indices]
+        non_zero_indices = torch.nonzero(policy, as_tuple=False)
 
-        non_zero_indices_cpu = non_zero_indices[0].cpu().tolist()
-        non_zero_values_cpu = non_zero_values.cpu().tolist()
+        for idx in non_zero_indices:
+            action_plane, from_row, from_col = idx.tolist()
+            prob = policy[action_plane, from_row, from_col].item()
 
-        for action_idx, prob in zip(non_zero_indices_cpu, non_zero_values_cpu):
-            action = Move(action_idx, self.game.board_size, self.turn)
+            move = Move.from_index(action_plane, from_row, from_col, self.turn)
             child_turn = self.game.get_opponent(self.turn)
-            child_state = self.game.take_action(self.state, action, self.turn)
-            child = Node(self.game, self.args, child_state, child_turn, self, action, prob)
+            child_state = self.game.take_action(self.state, move, self.turn)
+            child = Node(self.game, self.args, child_state, child_turn, self, move, prob)
             self.children.append(child)
+
 
     def backpropagate(self, value):
         self.value_sum += value
