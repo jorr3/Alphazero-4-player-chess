@@ -1,4 +1,5 @@
 import torch
+from line_profiler_pycharm import profile
 
 from src.move import Move
 from algos import select_child
@@ -22,6 +23,7 @@ class Node:
     def is_fully_expanded(self):
         return len(self.children) > 0
 
+    @profile
     def select_child(self):
         children_visit_counts = [child.visit_count for child in self.children]
         children_values = [child.value_sum / child.visit_count if child.visit_count > 0 else 0 for child in self.children]
@@ -39,18 +41,22 @@ class Node:
         return self.children[best_child_index] if best_child_index != -1 else None
 
     def expand(self, policy):
-        non_zero_indices = torch.nonzero(policy, as_tuple=False)
+        non_zero_indices = torch.nonzero(policy, as_tuple=False).tolist()
+        # Now non_zero_indices is a list of lists. Each sub-list represents [action_plane, from_row, from_col]
 
         for idx in non_zero_indices:
-            action_plane, from_row, from_col = idx.tolist()
-            prob = policy[action_plane, from_row, from_col].item()
+            # Since idx is already a list, we can unpack it directly without converting in the loop
+            action_plane, from_row, from_col = idx
 
             move = Move.from_index(action_plane, from_row, from_col, self.turn)
+
+            prob = policy[action_plane, from_row, from_col].item()
+
             child_turn = self.game.get_opponent(self.turn)
             child_state = self.game.take_action(self.state, move, self.turn)
+
             child = Node(self.game, self.args, child_state, child_turn, self, move, prob)
             self.children.append(child)
-
 
     def backpropagate(self, value):
         self.value_sum += value

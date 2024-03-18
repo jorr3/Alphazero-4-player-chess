@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-
+from line_profiler_pycharm import profile
 
 from node import Node
 
@@ -14,7 +14,7 @@ class MCTS:
     def search(self, states, games, player):
         encoded_states = self.gameType.get_encoded_states(states, self.neural_net.device)
         flat_root_policy = self.get_root_policy(encoded_states)
-        root_policy = self.gameType.parse_actionspace(flat_root_policy, states[0].GetTurn(), self.neural_net.device)
+        root_policy = self.gameType.parse_actionspace(flat_root_policy, states[0].GetTurn())
         self.initialize_games(games, states, root_policy, player)
 
         for _ in range(self.args['num_searches']):
@@ -65,21 +65,19 @@ class MCTS:
             game.node = node
             return True
 
+    @profile
     def update_with_neural_net_predictions(self, games):
         states = [game.node.state for game in games]
         encoded_states = self.gameType.get_encoded_states(states, self.neural_net.device)
         flat_policy, value = self.neural_net(encoded_states)
         flat_policy = torch.softmax(flat_policy, dim=1)
 
-        policy = self.gameType.parse_actionspace(flat_policy, states[0].GetTurn(), self.neural_net.device)
+        policy = self.gameType.parse_actionspace(flat_policy, states[0].GetTurn())
 
         valid_moves_mask = self.gameType.get_legal_actions_mask(states, self.neural_net.device)
         policy *= valid_moves_mask
         num_dims = tuple(range(1, len(self.gameType.state_space_dims) + 1))
         policy = policy / torch.sum(policy, dim=num_dims, keepdim=True)
-
-        non_zero_indices = torch.nonzero(policy, as_tuple=True)
-        probs = policy[non_zero_indices]
 
         for i, game in enumerate(games):
             node = game.node

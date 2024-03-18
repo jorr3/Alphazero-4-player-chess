@@ -131,6 +131,7 @@ if __name__ == "__main__":
     import time
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # device = torch.device("cpu")
 
     gameType = FourPlayerChess
 
@@ -139,12 +140,12 @@ if __name__ == "__main__":
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=0.0001)
 
     args = {
-        'max_game_length': 40,
+        'max_game_length': 25 * 4,
         'C': 2,
         'num_searches': 100,
         'num_iterations': 8,
-        'num_selfPlay_iterations': 500,
-        'num_parallel_games': 25,
+        'num_selfPlay_iterations': 10,
+        'num_parallel_games': 10,
         'num_epochs': 4,
         'batch_size': 128,
         'temperature': 1.25,

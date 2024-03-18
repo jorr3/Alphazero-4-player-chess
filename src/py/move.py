@@ -1,6 +1,8 @@
+import time
+
 import numpy as np
 from chessenv import BoardLocation, Move as CppMove, PlayerColor, color_value, Player
-
+from algos import move_parameters_from_index
 
 
 class Move:
@@ -12,16 +14,15 @@ class Move:
         (-2, -1), (-2, 1), (-1, -2), (-1, 2),
         (1, -2), (1, 2), (2, -1), (2, 1)
     ]
+
     board_size = 14
 
-    def __init__(self, from_row, from_col, to_row, to_col, player, normalize=False):
+    num_queen_moves_per_direction = board_size - 1
+    total_queen_moves = len(queen_move_offsets) * num_queen_moves_per_direction
+
+    def __init__(self, from_row, from_col, to_row, to_col, player):
+        self.from_row, self.from_col, self.to_row, self.to_col = from_row, from_col, to_row, to_col
         self.player = player
-        if normalize:
-            # Rotate move coordinates according to the player's perspective
-            self.from_row, self.from_col = self._rotate_position_to_player_perspective(from_row, from_col, player)
-            self.to_row, self.to_col = self._rotate_position_to_player_perspective(to_row, to_col, player)
-        else:
-            self.from_row, self.from_col, self.to_row, self.to_col = from_row, from_col, to_row, to_col
 
     def get_index(self):
         """Returns the action plane index and the 'from' coordinates in the 3D action space."""
@@ -67,23 +68,28 @@ class Move:
 
     @classmethod
     def from_index(cls, action_plane, from_row, from_col, player):
-        num_queen_moves_per_direction = cls.board_size - 1
-        total_queen_moves = len(cls.queen_move_offsets) * num_queen_moves_per_direction
-
-        if action_plane < total_queen_moves:
+        if action_plane < cls.total_queen_moves:
             # Queen move
-            direction_idx, distance = divmod(action_plane, num_queen_moves_per_direction)
+            direction_idx, distance = divmod(action_plane, cls.num_queen_moves_per_direction)
             delta_col, delta_row = cls.queen_move_offsets[direction_idx]
             to_row = from_row + delta_row * (distance + 1)
             to_col = from_col + delta_col * (distance + 1)
         else:
             # Knight move
-            knight_move_idx = action_plane - total_queen_moves
+            knight_move_idx = action_plane - cls.total_queen_moves
             delta_col, delta_row = cls.knight_move_offsets[knight_move_idx]
             to_row = from_row + delta_row
             to_col = from_col + delta_col
 
         return cls(from_row, from_col, to_row, to_col, player)
+
+    # @classmethod
+    # def from_index(cls, action_plane, from_row, from_col, player):
+    #     # Call the C++ function to get the move parameters
+    #     from_row, from_col, to_row, to_col = move_parameters_from_index(action_plane, from_row, from_col)
+    #
+    #     # Instantiate and return the class instance with the calculated positions
+    #     return cls(from_row, from_col, to_row, to_col, player)
 
     @classmethod
     def from_flat_index(cls, move_index, player):
@@ -106,14 +112,7 @@ class Move:
 
         return cls(from_row, from_col, to_row, to_col, player)
 
-    # @classmethod
-    # def _rotate_position_to_player_perspective(cls, row, col, player):
-    #     """Rotate coordinates so the player's perspective is always at the bottom."""
-    #     num_rotations = color_value(player.GetColor())
-    #     for _ in range(num_rotations):
-    #         row, col = col, cls.board_size - 1 - row  # Adjust the rotation logic if needed
-    #     return row, col
-
+    
     def to_cpp(self):
         """Converts to C++ Move object."""
         start_location = BoardLocation(self.from_row, self.from_col)
