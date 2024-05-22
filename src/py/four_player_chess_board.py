@@ -1,5 +1,8 @@
 import torch
-from chessenv import (
+
+from alphazero_cpp import (
+    Board as BoardCpp,
+    Move,
     GameResult,
     PlayerColor,
     Board,
@@ -7,18 +10,13 @@ from chessenv import (
     color_value,
     Player,
 )
-
-from src.igame import IGame
 from fen_parser import parse_board_from_fen
-from move import Move
 from fourpchess_interface import FourPlayerChessInterface
 
 from line_profiler_pycharm import profile
 
 
-
-
-class FourPlayerChess(IGame):
+class FourPlayerChess(BoardCpp):
     # start_fen = """R-0,0,0,0-1,1,1,1-1,1,1,1-0,0,0,0-0-x,x,x,1,1,yB,yK,yQ,yB,1,1,x,x,x/x,x,x,yP,yP,yP,yP,yP,yP,yP,yP,x,x,x/x,x,x,8,x,x,x/1,bP,10,gP,1/1,bP,10,gP,1/bB,bP,10,gP,gB/bQ,bP,10,gP,gK/bK,bP,10,gP,gQ/bB,bP,10,gP,gB/1,bP,10,gP,1/1,bP,10,gP,1/x,x,x,8,x,x,x/x,x,x,rP,rP,rP,rP,rP,rP,rP,rP,x,x,x/x,x,x,1,1,rB,rQ,rK,rB,1,1,x,x,x"""
     start_fen = """R-0,0,0,0-1,1,1,1-1,1,1,1-0,0,0,0-0-x,x,x,yR,yN,yB,yK,yQ,yB,yN,yR,x,x,x/x,x,x,yP,yP,yP,yP,yP,yP,yP,yP,x,x,x/x,x,x,8,x,x,x/bR,bP,10,gP,gR/bN,bP,10,gP,gN/bB,bP,10,gP,gB/bQ,bP,10,gP,gK/bK,bP,10,gP,gQ/bB,bP,10,gP,gB/bN,bP,10,gP,gN/bR,bP,10,gP,gR/x,x,x,8,x,x,x/x,x,x,rP,rP,rP,rP,rP,rP,rP,rP,x,x,x/x,x,x,rR,rN,rB,rQ,rK,rB,rN,rR,x,x,x"""
 
@@ -26,10 +24,9 @@ class FourPlayerChess(IGame):
     num_state_channels = 24
 
     # Pre-calculate some values for performance
-    state_space_size = num_state_channels * board_size**2
-    num_queen_moves = len(Move.queen_move_offsets) * (board_size - 1)
-    num_action_channels = num_queen_moves + len(Move.knight_move_offsets)
-    action_space_size = num_action_channels * board_size**2
+    state_space_size = num_state_channels * board_size ** 2
+    num_action_channels = Move.num_queen_moves + Move.num_knight_moves
+    action_space_size = num_action_channels * board_size ** 2
     action_space_dims = (num_action_channels, board_size, board_size)
     state_space_dims = (num_state_channels, board_size, board_size)
 
@@ -39,48 +36,28 @@ class FourPlayerChess(IGame):
     batch_indices_tensor = None
 
     def __init__(self):
+        super().__init__(*parse_board_from_fen(self.start_fen, self.board_size))
         self.state = parse_board_from_fen(self.start_fen, self.board_size)
         self.turn = PlayerColor.RED
         self.root = None
         self.node = None
         self.memory = []
 
-    def __repr__(self):
-        pass
-
-
-    @classmethod
-    def take_action(cls, state, action: Move, player, verbose=False):
-        """Takes action and returns the game state post-action."""
-        # This is a check that will be removed in production
-        # legal_moves = state.GetLegalMoves()
-        # move = str(action.to_cpp())
-        # if move not in [str(x) for x in legal_moves]:
-        #     print(state)
-        #     pass
-
-        state_copy = Board(state)
-        action_cpp = action.to_cpp()
-        state_copy.MakeMove(action_cpp)
-        return state_copy
-
     @classmethod
     def get_terminated(
-        cls, state, last_player_to_make_move: Player
+            cls, state, last_player_to_make_move: PlayerColor
     ) -> tuple[bool, None] | tuple[bool, float]:
         """Returns if the game is over and the value of the current state."""
         terminal_value_map = {
             GameResult.STALEMATE: 0.0,
             GameResult.WIN_RY: (
                 1.0
-                if last_player_to_make_move.GetColor()
-                in [PlayerColor.RED, PlayerColor.YELLOW]
+                if last_player_to_make_move in [PlayerColor.RED, PlayerColor.YELLOW]
                 else -1.0
             ),
             GameResult.WIN_BG: (
                 1.0
-                if last_player_to_make_move.GetColor()
-                in [PlayerColor.BLUE, PlayerColor.GREEN]
+                if last_player_to_make_move in [PlayerColor.BLUE, PlayerColor.GREEN]
                 else -1.0
             ),
         }
@@ -97,12 +74,6 @@ class FourPlayerChess(IGame):
 
         return True, terminal_value_map[result_state]
 
-    @classmethod
-    def get_opponent(cls, player: PlayerColor) -> int:
-        """Returns the opponent of the given player."""
-        opponent_idx = (color_value(player.GetColor()) + 1) % 4
-        return Player(PlayerColor(opponent_idx))
-
     @staticmethod
     def get_opponent_value(value: float) -> float:
         """Returns the value from the perspective of the opponent."""
@@ -115,7 +86,6 @@ class FourPlayerChess(IGame):
 
     # TODO: add attacked squares to the state representation
     @classmethod
-    
     def get_encoded_states(cls, states: list, device: str) -> torch.Tensor:
         """Returns an encoded representation of the game state for neural network inputs."""
         batch_size = len(states)
@@ -163,9 +133,8 @@ class FourPlayerChess(IGame):
         batch_indices, plane_indices, row_indices, col_indices = [], [], [], []
 
         for batch_index, state in enumerate(states):
-            for move_cpp in state.GetLegalMoves():
-                move = Move.from_cpp(move_cpp, state.GetTurn())
-                action_plane, from_row, from_col = move.get_index()
+            for move in state.GetLegalMoves():
+                action_plane, from_row, from_col = move.getIndex()
 
                 batch_indices.append(batch_index)
                 plane_indices.append(action_plane)

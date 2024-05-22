@@ -2,83 +2,85 @@ import random
 import wandb
 import torch
 import torch.nn.functional as F
-import pygame
+import sys
+# import pygame
 
-from src.igame import IGame
-from src.mcts import MCTS
-from src.move import Move
-from src.net import ResNet
-from src.fourpchess import FourPlayerChess
-from typing import Type
+from alphazero_cpp import Player, PlayerColor, Move, Board
+
+from src.py.fen_parser import parse_board_args_from_fen
+from src.py.mcts import MCTS
+from src.py.net import ResNet
 from tqdm import trange
-from chessenv import Player, PlayerColor
 from fourpchess_interface import FourPlayerChessInterface
 
-from line_profiler_pycharm import profile
+from memory_profiler import profile
 
 
 class AlphaZero:
-    def __init__(self, model, optimizer, gameType: Type[IGame], args, visualize=False):
+    def __init__(self, model, optimizer, gameType, args, game_init_args=None, visualize=False):
         self.model = model
         self.optimizer = optimizer
         self.gameType = gameType
         self.args = args
+        self.game_init_args = game_init_args
         self.mcts = MCTS(gameType, model, args)
         self.visualize = visualize
         if self.visualize:
             self.ui = FourPlayerChessInterface()
 
+    @profile
     def play(self):
         return_memory = []
         game_length = 0
-        player = Player(PlayerColor.RED)
-        games = [self.gameType() for _ in range(self.args['num_parallel_games'])]
+        player_color = PlayerColor.RED
+        states = [
+            self.gameType() if not self.game_init_args else self.gameType(*self.game_init_args)
+            for _ in range(self.args['num_parallel_games'])
+        ]
 
-        while len(games) > 0 and game_length < self.args['max_game_length']:
+        while len(states) > 0 and game_length < self.args['max_game_length']:
             print(game_length)
 
             if self.visualize:
-                self.ui.draw_board_state(games[0].state)
+                self.ui.draw_board_state(states[0].state)
 
-            states = [g.state for g in games]
+            self.mcts.search(states, player_color)
 
-            self.mcts.search(states, games, player)
+            for i in range(len(states))[::-1]:
+                state = states[i]
 
-            for i in range(len(games))[::-1]:
                 if self.visualize:
                     pygame.event.get()
 
-                game = games[i]
-
                 action_probs = torch.zeros(self.gameType.action_space_size, device=self.model.device)
-                for child in game.root.children:
-                    action_probs[child.action_taken.get_flat_index()] = child.visit_count
+                for child in state.GetRoot().GetChildren():
+                    action_probs[child.GetMoveMade().GetFlatIndex()] = child.GetVisitCount()
                 action_probs /= action_probs.sum()
 
-                game.memory.append((game.root.state, action_probs, player))
+                state.AppendToMemory((state.GetSimpleState(), action_probs, player_color))
 
                 temperature_adjusted_probs = torch.pow(action_probs, 1 / self.args['temperature'])
                 temperature_adjusted_probs /= temperature_adjusted_probs.sum()
                 action_index = torch.multinomial(temperature_adjusted_probs, 1).item()
-                action = Move.from_flat_index(action_index, player)
+                action = Move(action_index)
 
-                game.state = self.gameType.take_action(game.state, action, player, True)
+                state = state.TakeAction(action)
 
-                is_terminal, terminal_value = self.gameType.get_terminated(game.state, player)
+                is_terminal, terminal_value = state.GetTerminated()
 
                 if is_terminal:
-                    for hist_neutral_state, hist_action_probs, hist_player in game.memory:
-                        hist_outcome = terminal_value if hist_player == player else self.gameType.get_opponent_value(
+                    for hist_neutral_state, hist_action_probs, hist_player in state.GetMemory():
+                        hist_outcome = terminal_value if hist_player == player_color else self.gameType.GetOpponentValue(
                             terminal_value)
                         return_memory.append((
-                            self.gameType.get_encoded_state(hist_neutral_state),
+                            self.gameType.GetEncodedStates(hist_neutral_state),
                             hist_action_probs,
                             hist_outcome
                         ))
-                    del games[i]
+                    del states[i]
 
             game_length += 1
-            player = self.gameType.get_opponent(player)
+            player_color = self.gameType.GetOpponent(player_color)
 
         return return_memory
 
@@ -115,11 +117,11 @@ class AlphaZero:
             memory = []
 
             self.model.eval()
-            for selfPlay_iteration in trange(self.args['num_selfPlay_iterations'] // self.args['num_parallel_games']):
+            for _ in trange(self.args['num_games'] // self.args['num_parallel_games']):
                 memory += self.play()
 
             self.model.train()
-            for epoch in trange(self.args['num_epochs']):
+            for _ in trange(self.args['num_epochs']):
                 self.train(memory)
 
             # torch.save(self.model.state_dict(), f"model_{iteration}_{self.gameType}.pt")
@@ -133,7 +135,9 @@ if __name__ == "__main__":
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     # device = torch.device("cpu")
 
-    gameType = FourPlayerChess
+    gameType = Board
+
+    board_init_args = parse_board_args_from_fen(Board.start_fen, Board.board_size)
 
     model = ResNet(gameType, 20, 256, device)
 
@@ -143,8 +147,8 @@ if __name__ == "__main__":
         'max_game_length': 25 * 4,
         'C': 2,
         'num_searches': 100,
-        'num_iterations': 8,
-        'num_selfPlay_iterations': 10,
+        'num_iterations': 1,
+        'num_games': 10,
         'num_parallel_games': 10,
         'num_epochs': 4,
         'batch_size': 128,
@@ -153,5 +157,5 @@ if __name__ == "__main__":
         'dirichlet_alpha': 0.3
     }
 
-    alphaZero = AlphaZero(model, optimizer, gameType, args, visualize=False)
+    alphaZero = AlphaZero(model, optimizer, gameType, args, game_init_args=board_init_args, visualize=False, )
     alphaZero.learn()

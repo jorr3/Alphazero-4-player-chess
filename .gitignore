@@ -16,5 +16,9 @@ archive/
 *.pyproj
 *.sln
 *.pdb
+*.pyd
 /engine/bazel-testlogs
 /engine/MODULE.bazel.lock
+/DebugInstructions.md
+/notes.md
+libs/

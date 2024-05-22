@@ -1,6 +1,5 @@
 from typing import List, Optional, Tuple
-from chessenv import *
-
+from alphazero_cpp import *
 
 def split_str_on_whitespace(x: str) -> List[str]:
     return x.split()
@@ -100,7 +99,7 @@ def parse_move(board: 'Board', move_str: str, board_size: str) -> Optional['Move
             return move
     return None
 
-def parse_board_from_fen(fen: str, board_size: int) -> Optional['Board']:
+def parse_board_args_from_fen(fen: str, board_size: int) -> Optional['Board']:
     parts = split_str(fen, "-")
     if len(parts) < 7 or len(parts) > 8:
         return None
@@ -192,6 +191,5 @@ def parse_board_from_fen(fen: str, board_size: int) -> Optional['Board']:
 
     # board = Board(player, location_to_piece, castling_rights, enp)
     # TODO: fix this castling_rights and enp inputs!!
-    board = Board(player, location_to_piece)
-    return board
+    return player, location_to_piece
 
