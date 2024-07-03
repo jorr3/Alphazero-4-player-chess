@@ -12,7 +12,7 @@ class AlphazeroCppBuildExt(cpp_extension.BuildExtension):
         # shutil.rmtree("./build")
 
 
-alphazero_cpp_source_files = glob("./engine/*.cc") + glob("./src/cpp/*.cpp")
+alphazero_cpp_source_files = glob("./src/cpp/*.cpp") + glob("./src/cpp/engine/*.cpp")
 libs_path = "./src/cpp/libs"
 
 ext_modules = [
@@ -21,15 +21,14 @@ ext_modules = [
         sources=alphazero_cpp_source_files,
         include_dirs=[
             "./src/cpp",
-            "./engine",
             pybind11.get_include(),
         ]
         + cpp_extension.include_paths(),
         library_dirs=[libs_path + "/libtorch/lib"],
         libraries=["torch"],
         cxx_std=17,
-        extra_compile_args=["/Zi"],
         extra_link_args=["/DEBUG", "/PDB:alphazero_cpp.pdb"],
+        extra_compile_args=["/Zi", "/Od", "-g"],
     )
 ]
 

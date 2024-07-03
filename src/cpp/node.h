@@ -10,7 +10,7 @@
 
 #include "board.h"
 #include "move.h"
-#include "../../engine/board.h"
+#include "./engine/board.h"
 
 namespace fpchess
 {
@@ -19,26 +19,22 @@ namespace fpchess
     {
     public:
         Node() = default;
-        Node(const std::map<std::string, double> &args,
+        Node(const double C,
              std::shared_ptr<Board> state,
              chess::PlayerColor turn,
              std::weak_ptr<Node> parent = std::weak_ptr<Node>(),
              std::shared_ptr<Move> action_taken = nullptr,
              double prior = 0.0,
-             int visit_count = 0);
+             int visit_count = 1);
 
-        std::shared_ptr<fpchess::Board> GetState()
+        std::shared_ptr<Board> GetState()
         {
-            if (state == nullptr)
-            {
-                throw std::runtime_error("Full state not available. Use GetSimpleState() instead.");
-            }
             return state;
         }
 
         std::shared_ptr<chess::SimpleBoardState> GetSimpleState()
         {
-            return simple_state;
+            return std::make_shared<chess::SimpleBoardState>(state->GetSimpleState());
         }
 
         chess::PlayerColor GetTurn()
@@ -66,18 +62,23 @@ namespace fpchess
             visit_count = val;
         }
 
-        bool IsFullyExpanded() const;
-
+        bool IsExpanded() const;
         std::shared_ptr<Node> SelectChild();
+        void Backpropagate(float value);
+        static void BackpropagateNodes(const std::vector<std::shared_ptr<Node>> &nodes, const torch::Tensor &values);
+        void Expand(const torch::Tensor &policy, const std::vector<int64_t> &action_planes,
+                    const std::vector<int64_t> &from_rows, const std::vector<int64_t> &from_cols,
+                    const std::vector<double> &probs, BoardPool &pool);
 
-        void Expand(const torch::Tensor &policy);
-
-        void Backpropagate(double value);
+        static void ExpandNodes(std::vector<std::shared_ptr<Node>> &nodes,
+                                const torch::Tensor &policy_batch,
+                                const std::vector<std::vector<int64_t>> &non_zero_indices_batch,
+                                const std::vector<double> &non_zero_values,
+                                BoardPool &pool);
 
     private:
-        std::map<std::string, double> args;
+        double C;
         std::shared_ptr<Board> state;
-        std::shared_ptr<chess::SimpleBoardState> simple_state;
         chess::PlayerColor turn;
         std::weak_ptr<Node> parent;
         std::shared_ptr<Move> move_made;

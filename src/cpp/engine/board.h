@@ -88,34 +88,6 @@ struct std::hash<chess::Player>
 
 namespace chess
 {
-
-  // class Piece {
-  //  public:
-  //   Piece() : piece_type_(NO_PIECE) { }
-  //
-  //   Piece(Player player, PieceType piece_type)
-  //     : player_(std::move(player)),
-  //       piece_type_(piece_type)
-  //   { }
-  //
-  //   const Player& GetPlayer() const { return player_; }
-  //   PieceType GetPieceType() const { return piece_type_; }
-  //   Team GetTeam() const { return GetPlayer().GetTeam(); }
-  //   PlayerColor GetColor() const { return GetPlayer().GetColor(); }
-  //   bool operator==(const Piece& other) const {
-  //     return player_ == other.player_ && piece_type_ == other.piece_type_;
-  //   }
-  //   bool operator!=(const Piece& other) const {
-  //     return !(*this == other);
-  //   }
-  //   friend std::ostream& operator<<(
-  //       std::ostream& os, const Piece& piece);
-  //
-  //  private:
-  //   Player player_;
-  //   PieceType piece_type_;
-  // };
-
   class Piece
   {
   public:
@@ -450,7 +422,7 @@ namespace chess
 
     std::string ToString() const;
 
-  private:
+  protected:
     BoardLocation from_; // 1
     BoardLocation to_;   // 1
 
@@ -537,36 +509,6 @@ namespace chess
     }
   };
 
-  struct EvaluationOptions
-  {
-    std::optional<int> timelimit; // milliseconds
-    std::vector<Move> search_moves;
-    std::optional<bool> ponder;
-    std::optional<int> red_time;
-    std::optional<int> blue_time;
-    std::optional<int> yellow_time;
-    std::optional<int> green_time;
-    std::optional<int> red_inc;
-    std::optional<int> blue_inc;
-    std::optional<int> yellow_inc;
-    std::optional<int> green_inc;
-    std::optional<int> moves_to_go;
-    std::optional<int> depth;
-    std::optional<int> nodes;
-    std::optional<int> mate;
-    std::optional<bool> infinite;
-  };
-
-  class IAlphaBetaPlayer
-  {
-  public:
-    virtual std::optional<std::tuple<int, std::optional<Move>, int>> MakeMove(
-        Board &board,
-        std::optional<std::chrono::milliseconds> time_limit,
-        int max_depth) = 0;
-    virtual int64_t GetNumEvaluations() = 0;
-  };
-
   struct SimpleBoardState
   {
     Player turn;
@@ -592,19 +534,9 @@ namespace chess
             castling_rights = std::nullopt,
         std::optional<EnpassantInitialization> enp = std::nullopt);
 
-    Board(const Board &) = default;
+    Board(const Board &other);
 
     size_t GetPseudoLegalMoves2(Move *buffer, size_t limit);
-
-    const SimpleBoardState GetState() const
-    {
-      return SimpleBoardState{
-          turn_,
-          GetPieces(),
-          GetCastlingRights(),
-          GetEnpassantInitialization(),
-          GetAttackedSquares()};
-    }
 
     const std::vector<std::vector<PlacedPiece>> &GetPieces() const
     {
@@ -650,31 +582,18 @@ namespace chess
       throw std::invalid_argument("Location out of bounds");
     }
 
-    bool IsMoveLegal(const Move &move);
-    std::vector<Move> GetLegalMoves();
-    std::tuple<int, std::optional<Move>, std::string> Eval(IAlphaBetaPlayer &player, EvaluationOptions options);
-    std::unordered_map<PlayerColor, std::vector<BoardLocation>> GetAttackedSquares() const;
-    bool IsAttackedByPlayer(const BoardLocation &location, PlayerColor color) const;
-    bool IsKingInCheck(const Player &player) const;
-    bool IsKingInCheck(Team team) const;
-
     GameResult CheckWasLastMoveKingCapture() const;
     GameResult GetGameResult(std::optional<Player> opt_player = std::nullopt); // Avoid calling during search.
 
     Team TeamToPlay() const;
-    int PieceEvaluation() const;
-    int PieceEvaluation(PlayerColor color) const;
-    int MobilityEvaluation();
-    int MobilityEvaluation(const Player &player);
     const Player &GetTurn() const { return turn_; }
     void SetTurn(const Player &player) { turn_ = player; }
     bool IsAttackedByTeam(
         Team team,
         const BoardLocation &location) const;
 
-    //  std::vector<PlacedPiece> GetAttackers(
-    //      Team team, const BoardLocation& location,
-    //      bool return_early = false) const;
+    bool IsKingInCheck(const chess::Player &player) const;
+    bool IsKingInCheck(chess::Team team) const;
 
     size_t GetAttackers2(
         PlacedPiece *buffer, size_t limit,
@@ -688,22 +607,21 @@ namespace chess
     {
       return location_to_piece_[row][col];
     }
+
     const Piece &GetPiece(
         const BoardLocation &location) const
     {
       return GetPiece(location.GetRow(), location.GetCol());
     }
-    inline bool IsOnPathBetween(
-        const BoardLocation &from,
-        const BoardLocation &to,
-        const BoardLocation &between) const;
-    inline bool DiscoversCheck(
+
+    bool DiscoversCheck(
         const BoardLocation &king_location,
         const BoardLocation &move_from,
         const BoardLocation &move_to,
         Team attacking_team) const;
 
-    int64_t HashKey() const { return hash_key_; }
+    // int64_t HashKey() const { return hash_key_; }
+    int64_t HashKey() const { return 0; }
 
     static std::shared_ptr<Board> CreateStandardSetup();
     //  bool operator==(const Board& other) const;
@@ -712,16 +630,6 @@ namespace chess
 
     void MakeMove(const Move &move);
     void UndoMove();
-    bool LastMoveWasCapture() const
-    {
-      return !moves_.empty() && moves_.back().GetStandardCapture().Present();
-    }
-    const Move &GetLastMove() const
-    {
-      return moves_.back();
-    }
-    int NumMoves() const { return moves_.size(); }
-    const std::vector<Move> &Moves() { return moves_; }
 
     void GetPawnMoves2(
         MoveBuffer &moves,
@@ -784,15 +692,7 @@ namespace chess
     inline void SetPiece(const BoardLocation &location,
                          const Piece &piece);
 
-  private:
-    void AddMovesFromIncrMovement(
-        std::vector<Move> &moves,
-        const Piece &piece,
-        const BoardLocation &from,
-        int incr_row,
-        int incr_col,
-        CastlingRights initial_castling_rights = CastlingRights::kMissingRights,
-        CastlingRights castling_rights = CastlingRights::kMissingRights) const;
+  protected:
     int GetMaxRow() const { return 13; }
     int GetMaxCol() const { return 13; }
     std::optional<CastlingType> GetRookLocationType(
@@ -818,17 +718,6 @@ namespace chess
         PlayerColor pawn_color,
         const BoardLocation &other_loc) const;
 
-    void InitializeHash();
-    void UpdatePieceHash(const Piece &piece, const BoardLocation &loc)
-    {
-      hash_key_ ^= piece_hashes_[piece.GetColor()][piece.GetPieceType()]
-                                [loc.GetRow()][loc.GetCol()];
-    }
-    void UpdateTurnHash(int turn)
-    {
-      hash_key_ ^= turn_hashes_[turn];
-    }
-
     Player turn_;
 
     Piece location_to_piece_[14][14];
@@ -838,6 +727,7 @@ namespace chess
 
     CastlingRights castling_rights_[4];
     EnpassantInitialization enp_;
+    int max_moves_storage = 5;
     std::vector<Move> moves_; // list of moves from beginning of game
     std::vector<Move> move_buffer_;
     int piece_evaluations_[6]; // one per piece type
@@ -845,12 +735,10 @@ namespace chess
     int player_piece_evaluations_[4] = {0, 0, 0, 0}; // one per player
 
     int64_t hash_key_ = 0;
-    int64_t piece_hashes_[4][6][14][14];
     int64_t turn_hashes_[4];
     BoardLocation king_locations_[4];
 
     size_t move_buffer_size_ = 300;
-    Move move_buffer_2_[300];
   };
 
   // Helper functions

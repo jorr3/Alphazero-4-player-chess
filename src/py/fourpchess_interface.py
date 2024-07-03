@@ -42,7 +42,7 @@ class FourPlayerChessInterface:
         for color in colors:
             for piece in pieces:
                 try:
-                    self.piece_images[f"{color}_{piece}"] = pygame.image.load(f'../assets/{color}_{piece}.png')
+                    self.piece_images[f"{color}_{piece}"] = pygame.image.load(f'./assets/{color}_{piece}.png')
                 except pygame.error:
                     print(f"Image not found for: {color}_{piece}.png")
 

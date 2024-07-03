@@ -24,10 +24,36 @@ namespace fpchess
                  std::optional<std::unordered_map<chess::Player, chess::CastlingRights>> castling_rights = std::nullopt,
                  std::optional<chess::EnpassantInitialization> enp = std::nullopt)
         : chess::Board(turn, std::move(location_to_piece), castling_rights, enp),
-          root(),
-          node(),
-          memory(std::make_shared<std::vector<std::tuple<chess::SimpleBoardState, torch::Tensor, chess::PlayerColor>>>())
+          rootNode(),
+          node()
+    // memory(std::vector<MemoryEntry>())
     {
+    }
+
+    Board::Board(const Board &other)
+        : chess::Board(other), // Call the base class copy constructor
+          rootNode(other.rootNode),
+          node(other.node)
+    // memory(other.memory)
+    {
+        // Perform copying
+        rootNode = other.rootNode;
+        node = other.node;
+        // memory = other.memory;
+    }
+
+    Board::Board()
+        : chess::Board(chess::Player(), {}, std::nullopt, std::nullopt)
+    {
+    }
+
+    void Board::CopyFrom(const Board &other)
+    {
+        chess::Board::operator=(other); // Copy base class members
+
+        rootNode = other.rootNode;
+        node = other.node;
+        // memory = other.memory; heel traag
     }
 
     float Board::GetOpponentValue(float val)
@@ -47,18 +73,14 @@ namespace fpchess
 
     bool Board::IsKingSafeAfterMove(const Move &move)
     {
-        // MakeMove assigns turn_ to the next player so we store the current turn beforehand
-        chess::Player currentTurn = turn_;
-        MakeMove(move);
-        bool isSafe = !IsKingInCheck(currentTurn);
-        UndoMove();
-        return isSafe;
+        return DiscoversCheck(GetKingLocation(turn_.GetColor()), move.From(), move.To(), turn_.GetTeam());
     }
 
     bool Board::IsMoveLegal(const Move &move)
     {
+        Move buffer[300];
         chess::MoveBuffer moveBuffer;
-        moveBuffer.buffer = move_buffer_2_;
+        moveBuffer.buffer = buffer;
         moveBuffer.limit = move_buffer_size_;
         GetPseudoLegalMoves2(moveBuffer.buffer, moveBuffer.limit);
         bool isPseudoLegal = false;
@@ -83,8 +105,9 @@ namespace fpchess
         std::vector<Move> legalMoves;
         chess::Player TURN = turn_;
 
+        Move buffer[300];
         chess::MoveBuffer moveBuffer;
-        moveBuffer.buffer = move_buffer_2_;
+        moveBuffer.buffer = buffer;
         moveBuffer.limit = move_buffer_size_;
         moveBuffer.pos = 0;
         size_t numPseudoLegalMoves = GetPseudoLegalMoves2(moveBuffer.buffer, moveBuffer.limit);
@@ -101,65 +124,6 @@ namespace fpchess
         }
 
         return legalMoves;
-    }
-
-    std::tuple<int, std::optional<Move>, std::string> Board::Eval(chess::IAlphaBetaPlayer &player, chess::EvaluationOptions options)
-    {
-        using namespace std::chrono;
-
-        std::string dbg_str = "";
-        chess::GameResult game_result = GetGameResult();
-
-        if (game_result != chess::IN_PROGRESS)
-        {
-            dbg_str += "Game not in progress.";
-            return {-1, std::nullopt, dbg_str};
-        }
-
-        auto start = system_clock::now();
-        std::optional<Move> best_move;
-        std::optional<time_point<system_clock>> deadline;
-
-        if (options.timelimit.has_value())
-        {
-            deadline = start + milliseconds(options.timelimit.value());
-        }
-
-        int depth = 1;
-        int score_centipawn = 0;
-        while (depth < 100)
-        {
-            std::optional<milliseconds> time_limit;
-
-            if (deadline.has_value())
-            {
-                time_limit = duration_cast<milliseconds>(deadline.value() - system_clock::now());
-            }
-
-            auto res = player.MakeMove(*this, time_limit, depth);
-
-            if (res.has_value())
-            {
-                auto duration_ms = duration_cast<milliseconds>(system_clock::now() - start);
-                score_centipawn = std::get<0>(res.value());
-
-                best_move = std::get<1>(res.value());
-                if (std::abs(score_centipawn) == kMateValue)
-                {
-                    break;
-                }
-            }
-            else
-            {
-                break;
-            }
-
-            depth++;
-        }
-
-        dbg_str += "Depth: " + std::to_string(depth) + "\n";
-
-        return {score_centipawn, best_move, dbg_str};
     }
 
     std::unordered_map<chess::PlayerColor, std::vector<chess::BoardLocation>> Board::GetAttackedSquares() const
@@ -285,9 +249,9 @@ namespace fpchess
 
     std::shared_ptr<Board> Board::TakeAction(const Move &move)
     {
-        Board boardCopy = *this;
-        boardCopy.MakeMove(move);
-        return std::make_shared<Board>(std::move(boardCopy));
+        std::shared_ptr<Board> result = std::make_shared<Board>(*this);
+        result->MakeMove(move);
+        return result;
     }
 
     chess::PlayerColor Board::GetOpponent(const chess::PlayerColor &color)
@@ -386,13 +350,15 @@ namespace fpchess
         return ChangePerspective(encoded_states, amm_rotations);
     }
 
-    torch::Tensor Board::GetLegalMovesMask(const std::vector<std::shared_ptr<Board>> &states, const std::string &device)
+    torch::Tensor Board::GetLegalMovesMask(const std::vector<std::shared_ptr<Board>> &states, const std::string &device,
+                                           torch::Tensor &batch_indices_tensor,
+                                           torch::Tensor &plane_indices_tensor,
+                                           torch::Tensor &row_indices_tensor,
+                                           torch::Tensor &col_indices_tensor,
+                                           torch::Tensor &legal_moves_masks)
     {
         int batch_size = states.size();
         torch::TensorOptions options = ConfigureDevice(device);
-
-        const auto [dim0, dim1, dim2] = action_space_dims;
-        torch::Tensor legal_moves_masks = torch::zeros({batch_size, dim0, dim1, dim2}, options);
 
         std::vector<int64_t> batch_indices, plane_indices, row_indices, col_indices;
 
@@ -412,16 +378,68 @@ namespace fpchess
             }
         }
 
-        // Creating tensors from indices
-        auto plane_indices_tensor = torch::tensor(plane_indices, options);
-        auto row_indices_tensor = torch::tensor(row_indices, options);
-        auto col_indices_tensor = torch::tensor(col_indices, options);
-        auto batch_indices_tensor = torch::tensor(batch_indices, options);
+        // Ensure the tensors are large enough to hold the indices
+        size_t num_moves = batch_indices.size();
+        if (batch_indices_tensor.size(0) < num_moves)
+        {
+            batch_indices_tensor = torch::zeros({(int64_t)num_moves}, torch::kInt64).to(device);
+            plane_indices_tensor = torch::zeros({(int64_t)num_moves}, torch::kInt64).to(device);
+            row_indices_tensor = torch::zeros({(int64_t)num_moves}, torch::kInt64).to(device);
+            col_indices_tensor = torch::zeros({(int64_t)num_moves}, torch::kInt64).to(device);
+        }
+
+        // Copy the indices data to the tensors using direct data access
+        auto batch_indices_data = batch_indices_tensor.data_ptr<int64_t>();
+        auto plane_indices_data = plane_indices_tensor.data_ptr<int64_t>();
+        auto row_indices_data = row_indices_tensor.data_ptr<int64_t>();
+        auto col_indices_data = col_indices_tensor.data_ptr<int64_t>();
+
+        for (size_t i = 0; i < num_moves; ++i)
+        {
+            batch_indices_data[i] = batch_indices[i];
+            plane_indices_data[i] = plane_indices[i];
+            row_indices_data[i] = row_indices[i];
+            col_indices_data[i] = col_indices[i];
+        }
+
+        // Reset the legal_moves_masks tensor
+        legal_moves_masks.zero_();
 
         // Setting the corresponding positions in the mask tensor to 1
-        legal_moves_masks.index_put_({batch_indices_tensor, plane_indices_tensor, row_indices_tensor, col_indices_tensor}, 1);
+        legal_moves_masks.index_put_(
+            {batch_indices_tensor.slice(0, 0, num_moves),
+             plane_indices_tensor.slice(0, 0, num_moves),
+             row_indices_tensor.slice(0, 0, num_moves),
+             col_indices_tensor.slice(0, 0, num_moves)},
+            torch::tensor(1, options).to(device));
 
         return legal_moves_masks;
     }
 
+    std::tuple<std::vector<int64_t>, std::vector<int64_t>, std::vector<int64_t>, std::vector<int64_t>>
+    Board::GetLegalMovesIndices(const std::vector<std::vector<std::shared_ptr<Move>>> &legal_moves, size_t num_moves)
+    {
+        std::vector<int64_t> batch_indices(num_moves);
+        std::vector<int64_t> plane_indices(num_moves);
+        std::vector<int64_t> row_indices(num_moves);
+        std::vector<int64_t> col_indices(num_moves);
+
+        size_t index = 0;
+        for (size_t batch_index = 0; batch_index < legal_moves.size(); ++batch_index)
+        {
+            for (const auto &move : legal_moves[batch_index])
+            {
+                int action_plane, from_row, from_col;
+                std::tie(action_plane, from_row, from_col) = move->GetIndex();
+
+                batch_indices[index] = batch_index;
+                plane_indices[index] = action_plane;
+                row_indices[index] = from_row;
+                col_indices[index] = from_col;
+                ++index;
+            }
+        }
+
+        return {batch_indices, plane_indices, row_indices, col_indices};
+    }
 }

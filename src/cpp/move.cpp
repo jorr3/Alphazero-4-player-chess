@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <stdexcept>
 #include <iostream>
+#include <unordered_map>
 
 namespace fpchess
 {
@@ -13,6 +14,7 @@ namespace fpchess
     const int Move::num_queen_moves_per_direction = Move::board_size - 1;
     const int Move::num_queen_moves = Move::queen_move_offsets.size() * Move::num_queen_moves_per_direction;
     const int Move::num_knight_moves = Move::knight_move_offsets.size();
+    std::unordered_map<std::pair<int, int>, int, pair_hash> move_index_map;
 
     Move::Move(int action_plane, chess::BoardLocation from)
         : chess::Move(from, chess::BoardLocation::kNoLocation)
@@ -54,26 +56,41 @@ namespace fpchess
         }
     }
 
+    void Move::InitializeMoveIndexMap()
+    {
+        // Populate for queen moves
+        for (int i = 0; i < queen_move_offsets.size(); ++i)
+        {
+            for (int dist = 1; dist <= num_queen_moves_per_direction; ++dist)
+            {
+                int dx = queen_move_offsets[i].first * dist;
+                int dy = queen_move_offsets[i].second * dist;
+                int index = i * num_queen_moves_per_direction + (dist - 1);
+                move_index_map[{dx, dy}] = index;
+            }
+        }
+        // Populate for knight moves
+        int baseIndex = num_queen_moves;
+        for (int i = 0; i < knight_move_offsets.size(); ++i)
+        {
+            move_index_map[knight_move_offsets[i]] = baseIndex + i;
+        }
+    }
+
     std::tuple<int, int, int> Move::GetIndex() const
     {
         int dx = to_.GetCol() - from_.GetCol();
         int dy = to_.GetRow() - from_.GetRow();
-        auto direction = CalculateDirection(dx, dy);
-        int offset_index, action_plane_index;
+        std::pair<int, int> delta = {dx, dy};
 
-        if (std::find(knight_move_offsets.begin(), knight_move_offsets.end(), std::make_pair(dx, dy)) != knight_move_offsets.end())
+        auto it = move_index_map.find(delta);
+        if (it != move_index_map.end())
         {
-            offset_index = IndexOfMoveOffset(knight_move_offsets, {dx, dy});
-            action_plane_index = num_queen_moves + offset_index;
-        }
-        else
-        {
-            int direction_index = IndexOfMoveOffset(queen_move_offsets, direction);
-            int distance = std::max(std::abs(dx), std::abs(dy)) - 1;
-            action_plane_index = direction_index * num_queen_moves_per_direction + distance;
+            int action_plane_index = it->second;
+            return {action_plane_index, from_.GetRow(), from_.GetCol()};
         }
 
-        return {action_plane_index, from_.GetRow(), from_.GetCol()};
+        throw std::invalid_argument("Invalid move: No corresponding action plane index found. Did you initialize move_index_map?");
     }
 
     int Move::GetFlatIndex() const

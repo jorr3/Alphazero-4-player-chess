@@ -175,48 +175,48 @@ namespace chess
             AddPawnMoves2(moves, from, to, piece.GetColor());
           }
         }
-      }
-      else
-      {
+      } // NO EN PASSANT
+      // else
+      // {
 
-        // En-passant
-        if (other_piece.GetPieceType() == PAWN && piece.GetTeam() != other_piece.GetTeam())
-        {
+      //   // En-passant
+      //   if (other_piece.GetPieceType() == PAWN && piece.GetTeam() != other_piece.GetTeam())
+      //   {
 
-          int n_turns = (4 + piece.GetColor() - other_piece.GetColor()) % 4;
-          const Move *other_player_move = nullptr;
-          if (n_turns > 0 && n_turns <= (int)moves_.size())
-          {
-            other_player_move = &moves_[moves_.size() - n_turns];
-          }
-          else if (n_turns < 4)
-          {
-            const auto &enp_move = enp_.enp_moves[other_piece.GetColor()];
-            if (enp_move.has_value())
-            {
-              other_player_move = &enp_move.value();
-            }
-          }
+      //     int n_turns = (4 + piece.GetColor() - other_piece.GetColor()) % 4;
+      //     const Move *other_player_move = nullptr;
+      //     if (n_turns > 0 && n_turns <= (int)moves_.size())
+      //     {
+      //       other_player_move = &moves_[moves_.size() - n_turns];
+      //     }
+      //     else if (n_turns < 4)
+      //     {
+      //       const auto &enp_move = enp_.enp_moves[other_piece.GetColor()];
+      //       if (enp_move.has_value())
+      //       {
+      //         other_player_move = &enp_move.value();
+      //       }
+      //     }
 
-          if (other_player_move != nullptr && other_player_move->To() == to
-              // TODO: Refactor this with 'enp' locations
-              && other_player_move->ManhattanDistance() == 2 && (other_player_move->From().GetRow() == other_player_move->To().GetRow() || other_player_move->From().GetCol() == other_player_move->To().GetCol()))
-          {
-            const BoardLocation &moved_from = other_player_move->From();
-            int delta_row = to.GetRow() - moved_from.GetRow();
-            int delta_col = to.GetCol() - moved_from.GetCol();
-            BoardLocation enpassant_to = moved_from.Relative(
-                delta_row / 2, delta_col / 2);
-            // there may be both en-passant and piece capture in the same move
-            auto existing = GetPiece(enpassant_to);
-            if (existing.Missing() || existing.GetTeam() != piece.GetTeam())
-            {
-              AddPawnMoves2(moves, from, enpassant_to, piece.GetColor(),
-                            existing, to, other_piece);
-            }
-          }
-        }
-      }
+      //     if (other_player_move != nullptr && other_player_move->To() == to
+      //         // TODO: Refactor this with 'enp' locations
+      //         && other_player_move->ManhattanDistance() == 2 && (other_player_move->From().GetRow() == other_player_move->To().GetRow() || other_player_move->From().GetCol() == other_player_move->To().GetCol()))
+      //     {
+      //       const BoardLocation &moved_from = other_player_move->From();
+      //       int delta_row = to.GetRow() - moved_from.GetRow();
+      //       int delta_col = to.GetCol() - moved_from.GetCol();
+      //       BoardLocation enpassant_to = moved_from.Relative(
+      //           delta_row / 2, delta_col / 2);
+      //       // there may be both en-passant and piece capture in the same move
+      //       auto existing = GetPiece(enpassant_to);
+      //       if (existing.Missing() || existing.GetTeam() != piece.GetTeam())
+      //       {
+      //         AddPawnMoves2(moves, from, enpassant_to, piece.GetColor(),
+      //                       existing, to, other_piece);
+      //       }
+      //     }
+      //   }
+      // }
     }
 
     // Non-enpassant capture
@@ -273,37 +273,6 @@ namespace chess
           }
         }
       }
-    }
-  }
-
-  void Board::AddMovesFromIncrMovement(
-      std::vector<Move> &moves,
-      const Piece &piece,
-      const BoardLocation &from,
-      int incr_row,
-      int incr_col,
-      CastlingRights initial_castling_rights,
-      CastlingRights castling_rights) const
-  {
-    BoardLocation to = from.Relative(incr_row, incr_col);
-    while (IsLegalLocation(to))
-    {
-      const auto capture = GetPiece(to);
-      if (capture.Missing())
-      {
-        moves.emplace_back(from, to, Piece::kNoPiece, initial_castling_rights,
-                           castling_rights);
-      }
-      else
-      {
-        if (capture.GetTeam() != piece.GetTeam())
-        {
-          moves.emplace_back(from, to, capture, initial_castling_rights,
-                             castling_rights);
-        }
-        break;
-      }
-      to = to.Relative(incr_row, incr_col);
     }
   }
 
@@ -887,18 +856,6 @@ namespace chess
     // return attackers.size() > 0;
   }
 
-  bool Board::IsOnPathBetween(
-      const BoardLocation &from,
-      const BoardLocation &to,
-      const BoardLocation &between) const
-  {
-    int delta_row = from.GetRow() - to.GetRow();
-    int delta_col = from.GetCol() - to.GetCol();
-    int delta_row_between = from.GetRow() - between.GetRow();
-    int delta_col_between = from.GetCol() - between.GetCol();
-    return delta_row * delta_col_between == delta_col * delta_row_between;
-  }
-
   bool Board::DiscoversCheck(
       const BoardLocation &king_location,
       const BoardLocation &move_from,
@@ -1011,10 +968,12 @@ namespace chess
       return player.GetTeam() == RED_YELLOW ? WIN_BG : WIN_RY;
     }
 
-    size_t num_moves = GetPseudoLegalMoves2(move_buffer_2_, move_buffer_size_);
+    Move move_buffer[300];
+    size_t num_moves = GetPseudoLegalMoves2(move_buffer, move_buffer_size_);
+
     for (size_t i = 0; i < num_moves; i++)
     {
-      const auto &move = move_buffer_2_[i];
+      const auto &move = move_buffer[i];
       MakeMove(move);
       GameResult king_capture_result = CheckWasLastMoveKingCapture();
       if (king_capture_result != IN_PROGRESS)
@@ -1087,7 +1046,7 @@ namespace chess
     location_to_piece_[location.GetRow()][location.GetCol()] = piece;
     // Add to piece_list_
     piece_list_[piece.GetColor()].emplace_back(location, piece);
-    UpdatePieceHash(piece, location);
+    // UpdatePieceHash(piece, location);
     // Update king location
     if (piece.GetPieceType() == KING)
     {
@@ -1099,7 +1058,7 @@ namespace chess
   {
     const auto piece = GetPiece(location);
     assert(piece.Present());
-    UpdatePieceHash(piece, location);
+    // UpdatePieceHash(piece, location);
     location_to_piece_[location.GetRow()][location.GetCol()] = Piece();
     auto &placed_pieces = piece_list_[piece.GetColor()];
     for (auto it = placed_pieces.begin(); it != placed_pieces.end();)
@@ -1119,17 +1078,17 @@ namespace chess
     }
   }
 
-  void Board::InitializeHash()
-  {
-    for (int color = 0; color < 4; color++)
-    {
-      for (const auto &placed_piece : piece_list_[color])
-      {
-        UpdatePieceHash(placed_piece.GetPiece(), placed_piece.GetLocation());
-      }
-    }
-    UpdateTurnHash(static_cast<int>(turn_.GetColor()));
-  }
+  // void Board::InitializeHash()
+  // {
+  //   for (int color = 0; color < 4; color++)
+  //   {
+  //     for (const auto &placed_piece : piece_list_[color])
+  //     {
+  //       UpdatePieceHash(placed_piece.GetPiece(), placed_piece.GetLocation());
+  //     }
+  //   }
+  //   UpdateTurnHash(static_cast<int>(turn_.GetColor()));
+  // }
 
   void Board::MakeMove(const Move &move)
   {
@@ -1168,17 +1127,13 @@ namespace chess
 
     if (piece.Missing())
     {
-      std::cout 
-          << "Error: piece missing for move: " << std::endl
-          << "move"
-          << " from: " << move.From()
-          << " to: " << move.To() << std::endl
-          << " turn: " << turn_
-          << std::endl;
-      std::cout << *this << std::endl;
-      abort();
+      std::ostringstream err_msg;
+      err_msg << "Error: piece missing for move: " << std::endl
+              << "from: " << move.From().PrettyStr()
+              << " to: " << move.To().PrettyStr() << std::endl
+              << " turn: " << turn_ << std::endl;
+      throw std::runtime_error(err_msg.str());
     }
-    assert(piece.Present());
 
     RemovePiece(move.From());
     const auto promotion_piece_type = move.GetPromotionPieceType();
@@ -1220,11 +1175,17 @@ namespace chess
     }
 
     int t = static_cast<int>(turn_.GetColor());
-    UpdateTurnHash(t);
-    UpdateTurnHash((t + 1) % 4);
+    // UpdateTurnHash(t);
+    // UpdateTurnHash((t + 1) % 4);
 
     turn_ = GetNextPlayer(turn_);
     moves_.push_back(move);
+
+    if (moves_.size() > max_moves_storage)
+    {
+      // Remove the oldest move
+      moves_.erase(moves_.begin());
+    }
   }
 
   void Board::UndoMove()
@@ -1316,8 +1277,8 @@ namespace chess
     turn_ = turn_before;
     moves_.pop_back();
     int t = static_cast<int>(turn_.GetColor());
-    UpdateTurnHash(t);
-    UpdateTurnHash((t + 1) % 4);
+    // UpdateTurnHash(t);
+    // UpdateTurnHash((t + 1) % 4);
   }
 
   BoardLocation Board::GetKingLocation(PlayerColor color) const
@@ -1328,66 +1289,6 @@ namespace chess
   Team Board::TeamToPlay() const
   {
     return GetTeam(GetTurn().GetColor());
-  }
-
-  int Board::PieceEvaluation() const
-  {
-    return piece_evaluation_;
-  }
-
-  int Board::PieceEvaluation(PlayerColor color) const
-  {
-    return player_piece_evaluations_[color];
-  }
-
-  int Board::MobilityEvaluation(const Player &player)
-  {
-    Player turn = turn_;
-    turn_ = player;
-    int mobility = 0;
-    size_t num_moves = GetPseudoLegalMoves2(move_buffer_2_, move_buffer_size_);
-    int player_mobility = (int)num_moves;
-
-    if (player.GetTeam() == RED_YELLOW)
-    {
-      mobility += player_mobility;
-    }
-    else
-    {
-      mobility -= player_mobility;
-    }
-
-    mobility *= kMobilityMultiplier;
-
-    turn_ = turn;
-    return mobility;
-  }
-
-  int Board::MobilityEvaluation()
-  {
-    Player turn = turn_;
-
-    int mobility = 0;
-    for (int player_color = 0; player_color < 4; ++player_color)
-    {
-      turn_ = Player(static_cast<PlayerColor>(player_color));
-      size_t num_moves = GetPseudoLegalMoves2(move_buffer_2_, move_buffer_size_);
-      int player_mobility = (int)num_moves;
-
-      if (turn_.GetTeam() == RED_YELLOW)
-      {
-        mobility += player_mobility;
-      }
-      else
-      {
-        mobility -= player_mobility;
-      }
-    }
-
-    mobility *= kMobilityMultiplier;
-
-    turn_ = turn;
-    return mobility;
   }
 
   Board::Board(
@@ -1424,7 +1325,7 @@ namespace chess
     {
       enp_ = std::move(enp.value());
     }
-    move_buffer_.reserve(1000);
+    // move_buffer_.reserve(1000);
 
     for (int i = 0; i < 14; ++i)
     {
@@ -1497,21 +1398,41 @@ namespace chess
     {
       turn_hashes_[color] = rand64();
     }
-    for (int color = 0; color < 4; color++)
-    {
-      for (int piece_type = 0; piece_type < 6; piece_type++)
-      {
-        for (int row = 0; row < 14; row++)
-        {
-          for (int col = 0; col < 14; col++)
-          {
-            piece_hashes_[color][piece_type][row][col] = rand64();
-          }
-        }
-      }
-    }
+    // for (int color = 0; color < 4; color++)
+    // {
+    //   for (int piece_type = 0; piece_type < 6; piece_type++)
+    //   {
+    //     for (int row = 0; row < 14; row++)
+    //     {
+    //       for (int col = 0; col < 14; col++)
+    //       {
+    //         piece_hashes_[color][piece_type][row][col] = rand64();
+    //       }
+    //     }
+    //   }
+    // }
 
-    InitializeHash();
+    // InitializeHash();
+  }
+
+  Board::Board(const Board &other)
+      : turn_(other.turn_),
+        enp_(other.enp_),
+        moves_(other.moves_),
+        move_buffer_(other.move_buffer_),
+        piece_evaluation_(other.piece_evaluation_),
+        hash_key_(other.hash_key_),
+        move_buffer_size_(other.move_buffer_size_)
+  {
+    // Perform copying
+    std::copy(&other.location_to_piece_[0][0], &other.location_to_piece_[0][0] + 14 * 14, &location_to_piece_[0][0]);
+    piece_list_ = other.piece_list_;
+    std::copy(&other.locations_[0][0], &other.locations_[0][0] + 14 * 14, &locations_[0][0]);
+    std::copy(std::begin(other.castling_rights_), std::end(other.castling_rights_), std::begin(castling_rights_));
+    std::copy(std::begin(other.piece_evaluations_), std::end(other.piece_evaluations_), std::begin(piece_evaluations_));
+    std::copy(std::begin(other.player_piece_evaluations_), std::end(other.player_piece_evaluations_), std::begin(player_piece_evaluations_));
+    std::copy(std::begin(other.turn_hashes_), std::end(other.turn_hashes_), std::begin(turn_hashes_));
+    std::copy(std::begin(other.king_locations_), std::end(other.king_locations_), std::begin(king_locations_));
   }
 
   inline Team GetTeam(PlayerColor color)
@@ -1714,44 +1635,47 @@ namespace chess
 
   std::ostream &operator<<(std::ostream &os, const Move &move)
   {
-    os << "Move(" << move.From() << " -> " << move.To() << ")";
+    os << "Move(" << move.From().PrettyStr() << " -> " << move.To().PrettyStr() << ")";
     return os;
   }
 
-  std::ostream &operator<<(
-      std::ostream &os, const Board &board)
+  std::ostream &operator<<(std::ostream &os, const Board &board)
   {
     for (int i = 0; i < 14; i++)
     {
+      os << (13 - i < 9 ? " " : "") << 13 - i + 1 << ":";
       for (int j = 0; j < 14; j++)
       {
+        const auto piece = board.location_to_piece_[i][j];
         if (board.IsLegalLocation(BoardLocation(i, j)))
         {
-          const auto piece = board.location_to_piece_[i][j];
           if (piece.Missing())
           {
-            os << ".";
+            os << " . ";
           }
           else
           {
-            os << ToStr(piece.GetPieceType());
+            // os << ' ' << ToStr(piece.GetPieceType()) << ' ';
+            os << static_cast<int>(piece.GetColor()) << ToStr(piece.GetPieceType()) << ' ';
           }
         }
         else
         {
-          os << " ";
+          os << "   ";
         }
       }
       os << std::endl;
     }
 
-    os << "Turn: " << board.turn_ << std::endl;
-
-    os << "All moves: " << std::endl;
-    for (const auto &move : board.moves_)
+    // Column labels at the bottom, from 'a' to 'n'
+    os << "   "; // Align with the row labels
+    for (int j = 0; j < 14; j++)
     {
-      os << move << std::endl;
+      os << " " << char('a' + j) << " ";
     }
+    os << std::endl;
+
+    os << "Turn: " << board.turn_ << std::endl;
     return os;
   }
 
@@ -1886,8 +1810,8 @@ namespace chess
   void Board::MakeNullMove()
   {
     int t = static_cast<int>(turn_.GetColor());
-    UpdateTurnHash(t);
-    UpdateTurnHash((t + 1) % 4);
+    // UpdateTurnHash(t);
+    // UpdateTurnHash((t + 1) % 4);
 
     turn_ = GetNextPlayer(turn_);
   }
@@ -1897,8 +1821,8 @@ namespace chess
     turn_ = GetPreviousPlayer(turn_);
 
     int t = static_cast<int>(turn_.GetColor());
-    UpdateTurnHash(t);
-    UpdateTurnHash((t + 1) % 4);
+    // UpdateTurnHash(t);
+    // UpdateTurnHash((t + 1) % 4);
   }
 
   bool Move::DeliversCheck(Board &board)

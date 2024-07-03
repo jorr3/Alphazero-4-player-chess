@@ -10,10 +10,9 @@ from alphazero_cpp import (
     color_value,
     Player,
 )
-from fen_parser import parse_board_from_fen
-from fourpchess_interface import FourPlayerChessInterface
-
 from line_profiler_pycharm import profile
+
+from fourpchess_interface import FourPlayerChessInterface
 
 
 class FourPlayerChess(BoardCpp):
@@ -34,127 +33,75 @@ class FourPlayerChess(BoardCpp):
     color_channel_offsets = {color: color_value(color) * 24 // 4 for color in colors}
 
     batch_indices_tensor = None
+    plane_indices_tensor = None
+    row_indices_tensor = None
+    col_indices_tensor = None
+    legal_moves_masks = None
 
     def __init__(self):
         super().__init__(*parse_board_from_fen(self.start_fen, self.board_size))
         self.state = parse_board_from_fen(self.start_fen, self.board_size)
-        self.turn = PlayerColor.RED
         self.root = None
         self.node = None
         self.memory = []
 
     @classmethod
-    def get_terminated(
-            cls, state, last_player_to_make_move: PlayerColor
-    ) -> tuple[bool, None] | tuple[bool, float]:
-        """Returns if the game is over and the value of the current state."""
-        terminal_value_map = {
-            GameResult.STALEMATE: 0.0,
-            GameResult.WIN_RY: (
-                1.0
-                if last_player_to_make_move in [PlayerColor.RED, PlayerColor.YELLOW]
-                else -1.0
-            ),
-            GameResult.WIN_BG: (
-                1.0
-                if last_player_to_make_move in [PlayerColor.BLUE, PlayerColor.GREEN]
-                else -1.0
-            ),
-        }
-
-        result_state = state.GetGameResult()
-
-        if result_state == GameResult.IN_PROGRESS:
-            if len(state.GetLegalMoves()) == 0:
-                ui = FourPlayerChessInterface()
-                ui.draw_board_state(state)
-                return True, terminal_value_map[GameResult.STALEMATE]
-
-            return False, None
-
-        return True, terminal_value_map[result_state]
-
-    @staticmethod
-    def get_opponent_value(value: float) -> float:
-        """Returns the value from the perspective of the opponent."""
-        return -value
-
-    @classmethod
-    def parse_actionspace(cls, actionspaces_1d, turn):
-        actionspaces_3d = actionspaces_1d.view(-1, *cls.action_space_dims)
-        return cls.change_perspective(actionspaces_3d, -color_value(turn.GetColor()))
-
-    # TODO: add attacked squares to the state representation
-    @classmethod
-    def get_encoded_states(cls, states: list, device: str) -> torch.Tensor:
-        """Returns an encoded representation of the game state for neural network inputs."""
-        batch_size = len(states)
-        encoded_states = torch.zeros(
-            (batch_size, cls.num_state_channels, cls.board_size, cls.board_size),
-            dtype=torch.float32,
-            device=device,
-        )
-
-        # Batch indexing is used for performance reasons
-        batch_indices, channel_indices, row_indices, col_indices = [], [], [], []
-
-        for i, state in enumerate(states):
-            for placed_pieces in state.GetPieces():
-                for placed_piece in placed_pieces:
-                    piece, location = placed_piece.GetPiece(), placed_piece.GetLocation()
-                    piece_type, color = piece.GetPieceType(), piece.GetColor()
-                    row, col = location.GetRow(), location.GetCol()
-
-                    plane_idx = cls.color_channel_offsets[color] + piece_value(piece_type) - 1
-
-                    batch_indices.append(i)
-                    channel_indices.append(plane_idx)
-                    row_indices.append(row)
-                    col_indices.append(col)
-
-        batch_indices = torch.tensor(batch_indices, device=device)
-        channel_indices = torch.tensor(channel_indices, device=device)
-        row_indices = torch.tensor(row_indices, device=device)
-        col_indices = torch.tensor(col_indices, device=device)
-
-        encoded_states[batch_indices, channel_indices, row_indices, col_indices] = 1
-        return cls.change_perspective(encoded_states, color_value(states[0].GetTurn().GetColor()))
+    def init_tensors(cls, max_moves, batch_size, device):
+        cls.batch_indices_tensor = torch.zeros(max_moves, dtype=torch.int64, device=device)
+        cls.plane_indices_tensor = torch.zeros(max_moves, dtype=torch.int64, device=device)
+        cls.row_indices_tensor = torch.zeros(max_moves, dtype=torch.int64, device=device)
+        cls.col_indices_tensor = torch.zeros(max_moves, dtype=torch.int64, device=device)
+        cls.legal_moves_masks = torch.zeros((batch_size, *cls.action_space_dims), dtype=torch.float32, device=device)
 
     @classmethod
     @profile
-    def get_legal_actions_mask(cls, states: list, device: str) -> torch.Tensor:
-        """Returns a 4D tensor indicating valid moves for each state in the batch, in a 3D action space.
-        """
-        legal_moves_masks = torch.zeros(
-            (len(states), *cls.action_space_dims), dtype=torch.float32, device=device
+    def get_legal_moves_mask(cls, states, device):
+        batch_size = len(states)
+        legal_moves = [state.GetLegalMoves() for state in states]
+        num_moves = sum(len(moves) for moves in legal_moves)
+
+        if cls.batch_indices_tensor is None or cls.batch_indices_tensor.size(0) < num_moves:
+            cls.init_tensors(num_moves, batch_size, device)
+
+        batch_indices, plane_indices, row_indices, col_indices = cls.GetLegalMovesIndices(legal_moves, num_moves)
+
+        # Ensure the tensors are large enough to hold the indices
+        if cls.batch_indices_tensor.size(0) < len(batch_indices):
+            cls.init_tensors(len(batch_indices), batch_size, device)
+
+        # Copy the indices data to the tensors using direct data access to avoid memory allocation
+        cls.batch_indices_tensor[:len(batch_indices)].copy_(torch.tensor(batch_indices, dtype=torch.int64))
+        cls.plane_indices_tensor[:len(plane_indices)].copy_(torch.tensor(plane_indices, dtype=torch.int64))
+        cls.row_indices_tensor[:len(row_indices)].copy_(torch.tensor(row_indices, dtype=torch.int64))
+        cls.col_indices_tensor[:len(col_indices)].copy_(torch.tensor(col_indices, dtype=torch.int64))
+
+        # Reset the legal_moves_masks tensor
+        cls.legal_moves_masks.zero_()
+
+        # Setting the corresponding positions in the mask tensor to 1
+        cls.legal_moves_masks.index_put_(
+            (cls.batch_indices_tensor[:len(batch_indices)],
+             cls.plane_indices_tensor[:len(plane_indices)],
+             cls.row_indices_tensor[:len(row_indices)],
+             cls.col_indices_tensor[:len(col_indices)]),
+            torch.tensor(1, dtype=torch.float32, device=device)
         )
 
-        # Pre-calculate indices for batch updates
-        batch_indices, plane_indices, row_indices, col_indices = [], [], [], []
+        return cls.legal_moves_masks
 
-        for batch_index, state in enumerate(states):
-            for move in state.GetLegalMoves():
-                action_plane, from_row, from_col = move.getIndex()
+# @classmethod
+    # def get_legal_moves_mask(cls, states, device):
+    #     num_moves = sum(len(state.GetLegalMoves()) for state in states)
+    #
+    #     if cls.batch_indices_tensor is None or cls.batch_indices_tensor.size(0) < num_moves:
+    #         cls.init_tensors(num_moves, len(states), device)
+    #
+    #     return cls.GetLegalMovesMask(
+    #         states, device,
+    #         cls.batch_indices_tensor,
+    #         cls.plane_indices_tensor,
+    #         cls.row_indices_tensor,
+    #         cls.col_indices_tensor,
+    #         cls.legal_moves_masks
+    #     )
 
-                batch_indices.append(batch_index)
-                plane_indices.append(action_plane)
-                row_indices.append(from_row)
-                col_indices.append(from_col)
-
-        plane_indices_tensor = torch.tensor(plane_indices, dtype=torch.long, device=device)
-        row_indices_tensor = torch.tensor(row_indices, dtype=torch.long, device=device)
-        col_indices_tensor = torch.tensor(col_indices, dtype=torch.long, device=device)
-        batch_indices_tensor = torch.tensor(batch_indices, dtype=torch.long, device=device)
-
-        legal_moves_masks[
-            batch_indices_tensor,
-            plane_indices_tensor,
-            row_indices_tensor,
-            col_indices_tensor,
-        ] = 1
-
-        return legal_moves_masks
-
-    @staticmethod
-    def change_perspective(tensor: torch.Tensor, rotation):
-        return torch.rot90(tensor, k=rotation, dims=[-2, -1])
