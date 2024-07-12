@@ -1,3 +1,4 @@
+#include "node.h"
 #include "board.h"
 #include <tuple>
 #include <iostream>
@@ -5,55 +6,40 @@
 
 namespace fpchess
 {
-    const int Board::state_space_size = num_state_channels * board_size * board_size;
+    const int Board::state_space_size = num_state_channels * chess::rows_ * chess::cols_;
     // TODO: Remove the hard coded values!
-    const int Board::num_action_channels = 104 + 8;
-    const int Board::actionSpaceSize = num_action_channels * board_size * board_size;
-    const std::tuple<int, int, int> Board::action_space_dims = {num_action_channels, board_size, board_size};
-    const std::tuple<int, int, int> Board::state_space_dims = {num_state_channels, board_size, board_size};
-    const std::string Board::start_fen = "R-0,0,0,0-1,1,1,1-1,1,1,1-0,0,0,0-0-x,x,x,yR,yN,yB,yK,yQ,yB,yN,yR,x,x,x/x,x,x,yP,yP,yP,yP,yP,yP,yP,yP,x,x,x/x,x,x,8,x,x,x/bR,bP,10,gP,gR/bN,bP,10,gP,gN/bB,bP,10,gP,gB/bQ,bP,10,gP,gK/bK,bP,10,gP,gQ/bB,bP,10,gP,gB/bN,bP,10,gP,gN/bR,bP,10,gP,gR/x,x,x,8,x,x,x/x,x,x,rP,rP,rP,rP,rP,rP,rP,rP,x,x,x/x,x,x,rR,rN,rB,rQ,rK,rB,rN,rR,x,x,x";
-
-    const std::map<chess::PlayerColor, int> Board::color_channel_offsets = {
-        {chess::PlayerColor::RED, 0},
-        {chess::PlayerColor::BLUE, 6},
-        {chess::PlayerColor::YELLOW, 12},
-        {chess::PlayerColor::GREEN, 18}};
+    const int Board::num_action_channels = 4 * chess::rows_ + 4 * chess::cols_ + 8;
+    const int Board::actionSpaceSize = num_action_channels * chess::rows_ * chess::cols_;
+    const std::tuple<int, int, int> Board::action_space_dims = {num_action_channels, chess::rows_, chess::cols_};
+    const std::tuple<int, int, int> Board::state_space_dims = {num_state_channels, chess::rows_, chess::cols_};
 
     Board::Board(chess::Player turn,
                  std::unordered_map<chess::BoardLocation, chess::Piece> location_to_piece,
                  std::optional<std::unordered_map<chess::Player, chess::CastlingRights>> castling_rights = std::nullopt,
-                 std::optional<chess::EnpassantInitialization> enp = std::nullopt)
-        : chess::Board(turn, std::move(location_to_piece), castling_rights, enp),
+                 std::shared_ptr<Board> rootState = nullptr)
+        : chess::Board(turn, std::move(location_to_piece), castling_rights),
           rootNode(),
-          node()
-    // memory(std::vector<MemoryEntry>())
+          rootState(rootState)
     {
     }
 
-    Board::Board(const Board &other)
-        : chess::Board(other), // Call the base class copy constructor
-          rootNode(other.rootNode),
-          node(other.node)
-    // memory(other.memory)
-    {
-        // Perform copying
-        rootNode = other.rootNode;
-        node = other.node;
-        // memory = other.memory;
-    }
+    // Board::Board(const Board &other)
+    //     : chess::Board(other),
+    //       rootNode(other.rootNode),
+    //       rootState(other.rootState)
+    // {
+    // }
 
     Board::Board()
-        : chess::Board(chess::Player(), {}, std::nullopt, std::nullopt)
+        : chess::Board(chess::Player(), {}, std::nullopt)
     {
     }
 
     void Board::CopyFrom(const Board &other)
     {
-        chess::Board::operator=(other); // Copy base class members
+        chess::Board::operator=(other);
 
         rootNode = other.rootNode;
-        node = other.node;
-        // memory = other.memory; heel traag
     }
 
     float Board::GetOpponentValue(float val)
@@ -67,13 +53,18 @@ namespace fpchess
             GetTurn(),
             GetPieces(),
             GetCastlingRights(),
-            GetEnpassantInitialization(),
-            GetAttackedSquares()};
+            GetAttackedSquaresPlayers()};
     }
 
     bool Board::IsKingSafeAfterMove(const Move &move)
     {
-        return DiscoversCheck(GetKingLocation(turn_.GetColor()), move.From(), move.To(), turn_.GetTeam());
+        // MakeMove assigns turn_ to the next player so we store the current turn beforehand
+        chess::Player currentTurn = turn_;
+        MakeMove(move);
+        bool isSafe = !IsKingInCheck(currentTurn);
+        UndoMove();
+        return isSafe;
+        // return DiscoversCheck(GetKingLocation(turn_.GetColor()), move.From(), move.To(), turn_.GetTeam());
     }
 
     bool Board::IsMoveLegal(const Move &move)
@@ -126,16 +117,16 @@ namespace fpchess
         return legalMoves;
     }
 
-    std::unordered_map<chess::PlayerColor, std::vector<chess::BoardLocation>> Board::GetAttackedSquares() const
+    std::unordered_map<chess::PlayerColor, std::vector<chess::BoardLocation>> Board::GetAttackedSquaresPlayers() const
     {
         std::unordered_map<chess::PlayerColor, std::vector<chess::BoardLocation>> attackedSquares;
 
         for (int color = chess::RED; color <= chess::GREEN; ++color)
         {
             chess::PlayerColor playerColor = static_cast<chess::PlayerColor>(color);
-            for (int row = 0; row < 14; ++row)
+            for (int row = 0; row < nRows(); ++row)
             {
-                for (int col = 0; col < 14; ++col)
+                for (int col = 0; col < nCols(); ++col)
                 {
                     chess::BoardLocation location(row, col);
                     if (IsAttackedByPlayer(location, playerColor))
@@ -218,33 +209,26 @@ namespace fpchess
         return false;
     }
 
-    std::tuple<bool, float> Board::GetTerminated()
+    std::unordered_map<chess::Team, std::vector<chess::BoardLocation>> Board::GetAttackedSquaresTeams() const
     {
-        chess::PlayerColor lastPlayer = GetTurn().GetColor();
-        chess::GameResult result = GetGameResult();
+        std::unordered_map<chess::Team, std::vector<chess::BoardLocation>> attackedSquares;
 
-        if (result == chess::IN_PROGRESS)
+        for (int team = 0; team < chess::TEAM_COUNT; ++team)
         {
-            return std::make_tuple(false, 0);
+            chess::Team currentTeam = static_cast<chess::Team>(team);
+            for (int row = 0; row < nRows(); ++row)
+            {
+                for (int col = 0; col < nCols(); ++col)
+                {
+                    chess::BoardLocation location(row, col);
+                    if (IsAttackedByTeam(currentTeam, location))
+                    {
+                        attackedSquares[currentTeam].push_back(location);
+                    }
+                }
+            }
         }
-
-        float terminalValue = 0.0f;
-        switch (result)
-        {
-        case chess::STALEMATE:
-            terminalValue = 0.0f;
-            break;
-        case chess::WIN_RY:
-            terminalValue = (lastPlayer == chess::RED || lastPlayer == chess::YELLOW) ? 1 : -1;
-            break;
-        case chess::WIN_BG:
-            terminalValue = (lastPlayer == chess::BLUE || lastPlayer == chess::GREEN) ? 1 : -1;
-            break;
-        default:
-            break;
-        }
-
-        return std::make_tuple(true, terminalValue);
+        return attackedSquares;
     }
 
     std::shared_ptr<Board> Board::TakeAction(const Move &move)
@@ -298,12 +282,32 @@ namespace fpchess
         return options;
     }
 
+    std::map<chess::PlayerColor, int> Board::GenerateColorChannelOffsets(chess::PlayerColor color)
+    {
+        std::vector<chess::PlayerColor> colors = {chess::PlayerColor::RED, chess::PlayerColor::BLUE, chess::PlayerColor::YELLOW, chess::PlayerColor::GREEN};
+        std::rotate(colors.begin(), std::find(colors.begin(), colors.end(), color), colors.end());
+
+        std::map<chess::PlayerColor, int> offsets;
+        for (int i = 0; i < colors.size(); ++i)
+        {
+            offsets[colors[i]] = i * 6;
+        }
+        return offsets;
+    }
+
+    torch::Tensor Board::GetEncodedState(const Board state, const std::string &device)
+    {
+        std::vector<std::shared_ptr<Board>> state_vec;
+        state_vec.push_back(std::make_shared<Board>(state));
+        return GetEncodedStates(state_vec, device);
+    }
+
     torch::Tensor Board::GetEncodedStates(const std::vector<std::shared_ptr<Board>> &states, const std::string &device)
     {
         int batch_size = states.size();
         auto tensorOpts = ConfigureDevice(device);
 
-        torch::Tensor encoded_states = torch::zeros({batch_size, num_state_channels, board_size, board_size}, tensorOpts);
+        torch::Tensor encoded_states = torch::zeros({batch_size, num_state_channels, chess::rows_, chess::cols_}, tensorOpts);
 
         // Preparing indices for batch operations
         std::vector<int64_t> batch_indices;
@@ -315,6 +319,7 @@ namespace fpchess
         {
             auto &state = states[i];
             auto placed_pieces = state->GetPieces();
+            auto color_channel_offsets = GenerateColorChannelOffsets(state->GetTurn().GetColor());
 
             for (const auto &placed_piece_vec : placed_pieces)
             {

@@ -8,12 +8,13 @@
 
 #include <torch/extension.h>
 
-#include "board.h"
 #include "move.h"
 #include "./engine/board.h"
 
 namespace fpchess
 {
+    class Board;
+    class BoardPool;
 
     class Node : public std::enable_shared_from_this<Node>
     {
@@ -21,7 +22,6 @@ namespace fpchess
         Node() = default;
         Node(const double C,
              std::shared_ptr<Board> state,
-             chess::PlayerColor turn,
              std::weak_ptr<Node> parent = std::weak_ptr<Node>(),
              std::shared_ptr<Move> action_taken = nullptr,
              double prior = 0.0,
@@ -30,16 +30,6 @@ namespace fpchess
         std::shared_ptr<Board> GetState()
         {
             return state;
-        }
-
-        std::shared_ptr<chess::SimpleBoardState> GetSimpleState()
-        {
-            return std::make_shared<chess::SimpleBoardState>(state->GetSimpleState());
-        }
-
-        chess::PlayerColor GetTurn()
-        {
-            return turn;
         }
 
         std::vector<std::shared_ptr<Node>> GetChildren()
@@ -63,6 +53,7 @@ namespace fpchess
         }
 
         bool IsExpanded() const;
+        std::shared_ptr<Node> Node::ChooseLeaf();
         std::shared_ptr<Node> SelectChild();
         void Backpropagate(float value);
         static void BackpropagateNodes(const std::vector<std::shared_ptr<Node>> &nodes, const torch::Tensor &values);
@@ -77,13 +68,12 @@ namespace fpchess
                                 BoardPool &pool);
 
     private:
+        int visit_count;
         double C;
         std::shared_ptr<Board> state;
-        chess::PlayerColor turn;
         std::weak_ptr<Node> parent;
         std::shared_ptr<Move> move_made;
         double prior;
-        int visit_count;
         double value_sum;
         std::vector<std::shared_ptr<Node>> children;
     };

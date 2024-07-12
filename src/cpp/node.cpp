@@ -1,13 +1,12 @@
-#include "Node.h"
+#include "node.h"
 #include "board.h"
 #include <chrono>
 
 namespace fpchess
 {
-
-    Node::Node(const double C, std::shared_ptr<Board> state, chess::PlayerColor turn,
-               std::weak_ptr<Node> parent, std::shared_ptr<Move> action_taken, double prior, int visit_count)
-        : C(C), state(state), turn(turn), parent(parent),
+    Node::Node(const double C, std::shared_ptr<Board> state, std::weak_ptr<Node> parent,
+               std::shared_ptr<Move> action_taken, double prior, int visit_count)
+        : C(C), state(state), parent(parent),
           move_made(action_taken), prior(prior), visit_count(visit_count), value_sum(0)
     {
     }
@@ -17,29 +16,51 @@ namespace fpchess
         return !children.empty();
     }
 
-    std::shared_ptr<Node> Node::SelectChild()
+    std::shared_ptr<Node> Node::ChooseLeaf()
     {
-        std::vector<int> children_visit_counts;
-        std::vector<double> children_values;
-        std::vector<double> children_priors;
+        std::shared_ptr<Node> node = shared_from_this();
 
-        // Gather visit counts, values, and priors for each child
-        for (const auto &child : children)
+        while (node->IsExpanded())
         {
-            children_visit_counts.push_back(child->visit_count);
-            children_values.push_back(child->visit_count > 0 ? child->value_sum / child->visit_count : 0);
-            children_priors.push_back(child->prior);
+            node = node->SelectChild();
         }
 
+        auto node_state = node->GetState();
+        auto game_state = node_state->GetGameResult();
+
+        if (game_state != chess::GameResult::IN_PROGRESS)
+        {
+            if (game_state == chess::GameResult::STALEMATE)
+            {
+                node->Backpropagate(0);
+            }
+            else
+            {
+                node->Backpropagate(-1);
+            }
+            return nullptr;
+        }
+        else
+        {
+            return node;
+        }
+    }
+
+    std::shared_ptr<Node> Node::SelectChild()
+    {
         int best_child_index = -1;
         double best_ucb = -std::numeric_limits<double>::infinity();
         double parent_visit_count_sqrt = std::sqrt(static_cast<double>(visit_count));
+        double log_parent_visit_count = std::log(parent_visit_count_sqrt);
 
-        // Compute the UCB value for each child and find the child with the highest UCB value
-        for (size_t i = 0; i < children_visit_counts.size(); ++i)
+        for (size_t i = 0; i < children.size(); ++i)
         {
-            double q = children_visit_counts[i] == 0 ? 0 : children_values[i] / children_visit_counts[i];
-            double ucb = q + C * std::sqrt(std::log(parent_visit_count_sqrt) / (1 + children_visit_counts[i])) * children_priors[i];
+            const auto &child = children[i];
+            int child_visit_count = child->visit_count;
+            double child_value = child_visit_count > 0 ? child->value_sum / child_visit_count : 0;
+            double child_prior = child->prior;
+
+            double ucb = child_value + C * std::sqrt(log_parent_visit_count / (1 + child_visit_count)) * child_prior;
 
             if (ucb > best_ucb)
             {
@@ -55,7 +76,6 @@ namespace fpchess
 
         return children[best_child_index];
     }
-
     void Node::Expand(const torch::Tensor &policy, const std::vector<int64_t> &action_planes,
                       const std::vector<int64_t> &from_rows, const std::vector<int64_t> &from_cols,
                       const std::vector<double> &probs, BoardPool &pool)
@@ -67,13 +87,12 @@ namespace fpchess
             auto move = std::make_shared<Move>(
                 action_planes[i],
                 chess::BoardLocation(from_rows[i], from_cols[i]));
-            chess::PlayerColor child_turn = Board::GetOpponent(turn);
 
             std::shared_ptr<Board> child_state = pool.acquire(*state);
             child_state->MakeMove(*move);
 
             auto child = std::make_shared<Node>(
-                C, child_state, child_turn, shared_from_this(), move, probs[i]);
+                C, child_state, shared_from_this(), move, probs[i]);
             children.push_back(child);
         }
     }
@@ -133,4 +152,5 @@ namespace fpchess
             nodes[i]->Backpropagate(values_acc[i]);
         }
     }
+
 }

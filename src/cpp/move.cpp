@@ -7,11 +7,15 @@
 
 namespace fpchess
 {
+    constexpr int rows_ = chess::rows_;
+    constexpr int cols_ = chess::cols_;
+
     const std::vector<std::pair<int, int>> Move::queen_move_offsets = {
         {0, -1}, {-1, -1}, {-1, 0}, {-1, 1}, {0, 1}, {1, 1}, {1, 0}, {1, -1}};
     const std::vector<std::pair<int, int>> Move::knight_move_offsets = {
         {-2, -1}, {-2, 1}, {-1, -2}, {-1, 2}, {1, -2}, {1, 2}, {2, -1}, {2, 1}};
-    const int Move::num_queen_moves_per_direction = Move::board_size - 1;
+    // TODO: num_queen_moves_per_direction should be properly configured
+    const int Move::num_queen_moves_per_direction = rows_ - 1;
     const int Move::num_queen_moves = Move::queen_move_offsets.size() * Move::num_queen_moves_per_direction;
     const int Move::num_knight_moves = Move::knight_move_offsets.size();
     std::unordered_map<std::pair<int, int>, int, pair_hash> move_index_map;
@@ -36,10 +40,10 @@ namespace fpchess
 
     Move::Move(int flat_index)
     {
-        int total_positions = board_size * board_size;
+        int total_positions = rows_ * cols_;
         int move_type = flat_index / total_positions;
         int pos = flat_index % total_positions;
-        from_ = chess::BoardLocation(pos / board_size, pos % board_size);
+        from_ = chess::BoardLocation(pos / rows_, pos % cols_);
 
         if (move_type < num_queen_moves)
         {
@@ -96,7 +100,7 @@ namespace fpchess
     int Move::GetFlatIndex() const
     {
         auto [action_plane_index, _, __] = GetIndex();
-        return action_plane_index * (board_size * board_size) + from_.GetRow() * board_size + from_.GetCol();
+        return action_plane_index * (rows_ * cols_) + from_.GetRow() * rows_ + from_.GetCol();
     }
 
     std::ostream &operator<<(std::ostream &os, const Move &move)

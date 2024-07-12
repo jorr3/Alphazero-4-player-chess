@@ -12,7 +12,7 @@ class AlphazeroCppBuildExt(cpp_extension.BuildExtension):
         # shutil.rmtree("./build")
 
 
-alphazero_cpp_source_files = glob("./src/cpp/*.cpp") + glob("./src/cpp/engine/*.cpp")
+alphazero_cpp_source_files = glob("./src/cpp/engine/*.cpp") + glob("./src/cpp/*.cpp")
 libs_path = "./src/cpp/libs"
 
 ext_modules = [
@@ -34,7 +34,7 @@ ext_modules = [
 
 setup(
     name="alphazero_cpp",
-    version="0.1",
+    # version="0.1",
     ext_modules=ext_modules,
     cmdclass={"build_ext": AlphazeroCppBuildExt},
 )

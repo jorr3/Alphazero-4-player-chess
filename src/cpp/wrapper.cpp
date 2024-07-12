@@ -6,8 +6,8 @@
 #include <torch/extension.h>
 #include <sstream>
 #include "move.h"
-#include "board.h"
 #include "node.h"
+#include "board.h"
 #include "./engine/board.h"
 
 namespace py = pybind11;
@@ -17,7 +17,7 @@ PYBIND11_MODULE(alphazero_cpp, m)
     py::register_exception_translator([](std::exception_ptr p)
                                       {
         try {
-            if (p) std::rethrow_exception(p);
+            if (p) std::rethrow_exception(p); 
         } catch (const std::exception &e) {
             // Only use the exception's what() method to get the message
             PyErr_SetString(PyExc_RuntimeError, e.what());
@@ -70,14 +70,12 @@ PYBIND11_MODULE(alphazero_cpp, m)
         .def_readwrite("turn", &chess::SimpleBoardState::turn)
         .def_readwrite("pieces", &chess::SimpleBoardState::pieces)
         .def_readwrite("castlingRights", &chess::SimpleBoardState::castlingRights)
-        .def_readwrite("enpassantInitialization", &chess::SimpleBoardState::enpassantInitialization)
         .def_readwrite("attackedSquares", &chess::SimpleBoardState::attackedSquares);
 
     py::class_<fpchess::MemoryEntry>(m, "MemoryEntry")
-        .def(py::init<const fpchess::Board &, const at::Tensor &, chess::PlayerColor>())
+        .def(py::init<const fpchess::Board &, const at::Tensor &>())
         .def_readwrite("state", &fpchess::MemoryEntry::state)
-        .def_readwrite("stateTensor", &fpchess::MemoryEntry::action)
-        .def_readwrite("color", &fpchess::MemoryEntry::color);
+        .def_readwrite("action", &fpchess::MemoryEntry::action);
 
     // Classes
     py::class_<chess::Player>(m, "Player")
@@ -132,10 +130,6 @@ PYBIND11_MODULE(alphazero_cpp, m)
         .def("__str__", [](const chess::PlacedPiece &self)
              { return self.PrettyStr(); });
 
-    py::class_<chess::EnpassantInitialization>(m, "EnpassantInitialization")
-        .def(py::init<>())
-        .def_readwrite("enp_moves", &chess::EnpassantInitialization::enp_moves);
-
     fpchess::Move::InitializeMoveIndexMap();
 
     py::class_<fpchess::Move, std::shared_ptr<fpchess::Move>>(m, "Move")
@@ -159,7 +153,6 @@ PYBIND11_MODULE(alphazero_cpp, m)
         .def(py::init<chess::BoardLocation, chess::BoardLocation, chess::SimpleMove, chess::CastlingRights, chess::CastlingRights>(),
              py::arg("from"), py::arg("to"), py::arg("rook_move"), py::arg("initial_castling_rights"), py::arg("castling_rights"))
 
-        .def_readonly_static("board_size", &fpchess::Move::board_size)
         .def_readonly_static("num_queen_moves_per_direction", &fpchess::Move::num_queen_moves_per_direction)
         .def_readonly_static("num_queen_moves", &fpchess::Move::num_queen_moves)
         .def_readonly_static("num_knight_moves", &fpchess::Move::num_knight_moves)
@@ -170,29 +163,27 @@ PYBIND11_MODULE(alphazero_cpp, m)
         .def("GetFlatIndex", &fpchess::Move::GetFlatIndex);
 
     py::class_<fpchess::Board, std::shared_ptr<fpchess::Board>>(m, "Board")
-        .def(py::init<const fpchess::Board &>())
+        // .def(py::init<const fpchess::Board &>())
         .def(py::init<chess::Player,
                       std::unordered_map<chess::BoardLocation, chess::Piece>,
                       std::optional<std::unordered_map<chess::Player, chess::CastlingRights>>,
-                      std::optional<chess::EnpassantInitialization>>(),
+                      std::shared_ptr<fpchess::Board>>(),
+
              py::arg("turn"),
              py::arg("location_to_piece"),
              py::arg("castling_rights") = std::nullopt,
-             py::arg("enp") = std::nullopt)
-        //.def(py::init<chess::Player, std::unordered_map<chess::BoardLocation, chess::Piece>, std::unordered_map<chess::Player, chess::CastlingRights>, chess::EnpassantInitialization>())
+             py::arg("root_state") = nullptr)
 
-        .def_readonly_static("board_size", &fpchess::Board::board_size)
         .def_readonly_static("num_state_channels", &fpchess::Board::num_state_channels)
         .def_readonly_static("state_space_size", &fpchess::Board::state_space_size)
         .def_readonly_static("num_action_channels", &fpchess::Board::num_action_channels)
         .def_readonly_static("action_space_size", &fpchess::Board::actionSpaceSize)
         .def_readonly_static("action_space_dims", &fpchess::Board::action_space_dims)
         .def_readonly_static("state_space_dims", &fpchess::Board::state_space_dims)
-        .def_readonly_static("start_fen", &fpchess::Board::start_fen)
 
+        .def("CalculateHeuristic", &fpchess::Board::CalculateHeuristic)
         .def("GetTurn", &fpchess::Board::GetTurn)
         .def("SetTurn", &fpchess::Board::SetTurn)
-        .def("GetTerminated", &fpchess::Board::GetTerminated)
         .def("GetOpponentValue", &fpchess::Board::GetOpponentValue)
         .def("GetPieceAt", &fpchess::Board::GetLocationToPiece, py::arg("x"), py::arg("y"))
         .def("GetBoardLocation", &fpchess::Board::GetBoardLocation, py::arg("x"), py::arg("y"))
@@ -202,8 +193,6 @@ PYBIND11_MODULE(alphazero_cpp, m)
         .def("GetRootState", &fpchess::Board::GetRootState)
         .def("SetRootState", &fpchess::Board::SetRootState)
         .def("AppendToMemory", &fpchess::Board::AppendToMemory)
-        .def("GetNode", &fpchess::Board::GetNode)
-        .def("SetNode", &fpchess::Board::SetNode)
         .def("GetMemory", &fpchess::Board::GetMemory)
         .def(
             "GetGameResult", [](fpchess::Board &self, std::optional<chess::Player> opt_player)
@@ -212,14 +201,21 @@ PYBIND11_MODULE(alphazero_cpp, m)
         .def("GetSimpleState", &fpchess::Board::GetSimpleState)
         .def("IsMoveLegal", &fpchess::Board::IsMoveLegal)
         .def("GetLegalMoves", &fpchess::Board::GetLegalMoves)
-        .def("GetAttackedSquares", &fpchess::Board::GetAttackedSquares)
+        .def("GetAttackedSquaresPlayers", &fpchess::Board::GetAttackedSquaresPlayers)
+        .def("GetAttackedSquaresTeams", &fpchess::Board::GetAttackedSquaresTeams)
         .def("IsAttackedByPlayer", &fpchess::Board::IsAttackedByPlayer)
         .def("TakeAction", &fpchess::Board::TakeAction)
         .def("ParseActionspace", &fpchess::Board::ParseActionspace)
 
+        .def_static("IsLegalLocation", py::overload_cast<int, int>(&chess::Board::IsLegalLocation))
+        .def_static("IsLegalLocation", py::overload_cast<const chess::BoardLocation &>(&chess::Board::IsLegalLocation))
+        .def_static("nRows", &fpchess::Board::nRows)
+        .def_static("nCols", &fpchess::Board::nCols)
+        .def_static("invalidArea", &fpchess::Board::invalidArea)
         .def_static("GetOpponent", py::overload_cast<const chess::PlayerColor &>(&fpchess::Board::GetOpponent))
         .def_static("GetOpponent", py::overload_cast<const chess::Player &>(&fpchess::Board::GetOpponent))
         .def_static("ChangePerspective", &fpchess::Board::ChangePerspective)
+        .def_static("GetEncodedState", &fpchess::Board::GetEncodedState)
         .def_static("GetEncodedStates", &fpchess::Board::GetEncodedStates)
         .def_static("GetLegalMovesMask", &fpchess::Board::GetLegalMovesMask)
         .def_static("GetLegalMovesIndices", &fpchess::Board::GetLegalMovesIndices)
@@ -237,18 +233,15 @@ PYBIND11_MODULE(alphazero_cpp, m)
     py::class_<fpchess::Node, std::shared_ptr<fpchess::Node>>(m, "Node")
         .def(py::init<const double,
                       std::shared_ptr<fpchess::Board>,
-                      chess::PlayerColor,
                       std::shared_ptr<fpchess::Node>,
                       std::shared_ptr<fpchess::Move>,
                       double,
                       int>(),
-             py::arg("C"), py::arg("state"), py::arg("turn"),
+             py::arg("C"), py::arg("state"),
              py::arg("parent") = nullptr, py::arg("action_taken") = nullptr,
              py::arg("prior") = 0.0, py::arg("visit_count") = 0)
         .def("GetMoveMade", &fpchess::Node::GetMoveMade)
         .def("GetState", &fpchess::Node::GetState)
-        .def("GetSimpleState", &fpchess::Node::GetSimpleState)
-        .def("GetTurn", &fpchess::Node::GetTurn)
         .def("GetChildren", &fpchess::Node::GetChildren)
         .def("GetVisitCount", &fpchess::Node::GetVisitCount)
         .def("SetVisitCount", &fpchess::Node::SetVisitCount)
@@ -256,5 +249,6 @@ PYBIND11_MODULE(alphazero_cpp, m)
         .def("SelectChild", &fpchess::Node::SelectChild)
         .def("Backpropagate", &fpchess::Node::Backpropagate)
         .def_static("BackpropagateNodes", &fpchess::Node::BackpropagateNodes)
-        .def_static("ExpandNodes", &fpchess::Node::ExpandNodes);
+        .def_static("ExpandNodes", &fpchess::Node::ExpandNodes)
+        .def("ChooseLeaf", &fpchess::Node::ChooseLeaf);
 }

@@ -1,10 +1,8 @@
 import numpy as np
 import torch
 
-from alphazero_cpp import Node, BoardPool
+from alphazero_cpp import Node, BoardPool, GameResult
 from line_profiler_pycharm import profile
-
-from src.py.four_player_chess_board import FourPlayerChess
 
 
 class MCTS:
@@ -15,18 +13,34 @@ class MCTS:
         self.board_pool = BoardPool(int(args["pool_size"]))
 
     @torch.no_grad()
-    def search(self, games, player):
-        for g in games:
-            g.SetRootNode(Node(self.args["C"], g, player, visit_count=1))
+    @profile
+    def search(self, games):
+        def get_expandable_leaves(non_terminal_nodes):
+            expandable_leaves = []
+            for node in non_terminal_nodes[:]:
+                leaf = node.ChooseLeaf()
+                if leaf is None:
+                    non_terminal_nodes.remove(node)
+                else:
+                    expandable_leaves.append(leaf)
+            return expandable_leaves
+
+        root_nodes = []
+        for game in games:
+            root_node = Node(self.args["C"], game, visit_count=1)
+            game.SetRootNode(root_node)
+            root_nodes.append(root_node)
+
+        non_terminal_root_nodes = root_nodes[:]
 
         for _ in range(self.args["num_searches"]):
-            non_terminal_games = [g for g in games if self.choose_leaf(g)]
-            self.step(non_terminal_games)
+            expandable_leaves = get_expandable_leaves(non_terminal_root_nodes)
+            self.step(expandable_leaves)
 
-    def get_root_policy(self, encoded_states):
-        root_policy, _ = self.neural_net(encoded_states)
-        root_policy = torch.softmax(root_policy, dim=1)
-        return self.add_dirichlet_noise(root_policy, self.neural_net.device)
+        for l in root_nodes:
+            assert len(l.GetChildren()) > 0
+
+        return root_nodes
 
     def add_dirichlet_noise(self, policy, device):
         dirichlet_alpha = self.args["dirichlet_alpha"]
@@ -41,49 +55,35 @@ class MCTS:
         )
         return (1 - dirichlet_epsilon) * policy + dirichlet_epsilon * noise
 
-    def choose_leaf(self, game):
-        node = game.GetRootNode()
-
-        while node.IsExpanded():
-            node = node.SelectChild()
-
-        is_terminal, terminal_value = node.GetState().GetTerminated()
-        if is_terminal:
-            node.Backpropagate(terminal_value)
-            return False
-        else:
-            game.SetNode(node)
-            return True
-
     @profile
-    def step(self, games):
-        if len(games) == 0:
+    def step(self, leaves):
+        if len(leaves) == 0:
             return
 
-        states = [game.GetNode().GetState() for game in games]
+        states = [leave.GetState() for leave in leaves]
+
         encoded_states = self.gameType.GetEncodedStates(states, str(self.neural_net.device))
         flat_policy, value = self.neural_net(encoded_states)
         flat_policy = torch.softmax(flat_policy, dim=1)
 
         policy = self.gameType.ParseActionspace(flat_policy, states[0].GetTurn())
 
-        valid_moves_mask = FourPlayerChess.get_legal_moves_mask(
+        valid_moves_mask = self.gameType.get_legal_moves_mask(
             states, str(self.neural_net.device)
         )
-        policy *= valid_moves_mask[: len(states)]
+        policy *= valid_moves_mask#[: len(states)]
         num_dims = tuple(range(1, len(self.gameType.state_space_dims) + 1))
         policy = policy / torch.sum(policy, dim=num_dims, keepdim=True)
 
-        nodes = [game.GetNode() for game in games]
-        Node.BackpropagateNodes(nodes, value.squeeze(1))
-        self.expand(nodes, policy)
+        Node.BackpropagateNodes(leaves, value.squeeze(1))
+        self.expand(leaves, policy)
 
     @profile
-    def expand(self, nodes, policy_batch):
+    def expand(self, leaves, policy_batch):
         policy_batch_cpu = policy_batch.cpu()
         non_zero_indices_batch = torch.nonzero(policy_batch).tolist()
 
         non_zero_indices = torch.nonzero(policy_batch_cpu, as_tuple=True)
         non_zero_values = policy_batch_cpu[non_zero_indices].tolist()
 
-        Node.ExpandNodes(nodes, policy_batch_cpu, non_zero_indices_batch, non_zero_values, self.board_pool)
+        Node.ExpandNodes(leaves, policy_batch_cpu, non_zero_indices_batch, non_zero_values, self.board_pool)

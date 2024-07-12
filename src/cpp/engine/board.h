@@ -15,9 +15,13 @@
 #include <string>
 #include <array>
 #include <chrono>
+#include <map>
 
 namespace chess
 {
+  constexpr int rows_ = 8;
+  constexpr int cols_ = 8;
+  constexpr int invalid_area = 2;
 
   class Board;
 
@@ -47,6 +51,7 @@ namespace chess
   {
     RED_YELLOW = 0,
     BLUE_GREEN = 1,
+    TEAM_COUNT = 2,
   };
 
   class Player
@@ -185,18 +190,18 @@ namespace chess
   class BoardLocation
   {
   public:
-    BoardLocation() : loc_(196) {}
+    BoardLocation() : loc_(rows_ * cols_) {}
     BoardLocation(int8_t row, int8_t col)
     {
-      loc_ = (row < 0 || row >= 14 || col < 0 || col >= 14)
-                 ? 196
-                 : 14 * row + col;
+      loc_ = (row < 0 || row >= rows_ || col < 0 || col >= cols_)
+                 ? rows_ * cols_
+                 : rows_ * row + col;
     }
 
-    bool Present() const { return loc_ < 196; }
+    bool Present() const { return loc_ < rows_ * cols_; }
     bool Missing() const { return !Present(); }
-    int8_t GetRow() const { return loc_ / 14; }
-    int8_t GetCol() const { return loc_ % 14; }
+    int8_t GetRow() const { return loc_ / rows_; }
+    int8_t GetCol() const { return loc_ % cols_; }
 
     BoardLocation Relative(int8_t delta_row, int8_t delta_col) const
     {
@@ -349,9 +354,7 @@ namespace chess
         : from_(std::move(from)),
           to_(std::move(to)),
           standard_capture_(standard_capture),
-          promotion_piece_type_(promotion_piece_type),
-          en_passant_location_(en_passant_location),
-          en_passant_capture_(en_passant_capture)
+          promotion_piece_type_(promotion_piece_type)
     {
     }
 
@@ -378,14 +381,6 @@ namespace chess
     {
       return promotion_piece_type_;
     }
-    const BoardLocation GetEnpassantLocation() const
-    {
-      return en_passant_location_;
-    }
-    Piece GetEnpassantCapture() const
-    {
-      return en_passant_capture_;
-    }
     SimpleMove GetRookMove() const { return rook_move_; }
     CastlingRights GetInitialCastlingRights() const
     {
@@ -398,16 +393,16 @@ namespace chess
 
     bool IsCapture() const
     {
-      return standard_capture_.Present() || en_passant_capture_.Present();
+      return standard_capture_.Present();
     }
     Piece GetCapturePiece() const
     {
-      return standard_capture_.Present() ? standard_capture_ : en_passant_capture_;
+      return standard_capture_;
     }
 
     bool operator==(const Move &other) const
     {
-      return from_ == other.from_ && to_ == other.to_ && standard_capture_ == other.standard_capture_ && promotion_piece_type_ == other.promotion_piece_type_ && en_passant_location_ == other.en_passant_location_ && en_passant_capture_ == other.en_passant_capture_ && rook_move_ == other.rook_move_ && initial_castling_rights_ == other.initial_castling_rights_ && castling_rights_ == other.castling_rights_;
+      return from_ == other.from_ && to_ == other.to_ && standard_capture_ == other.standard_capture_ && promotion_piece_type_ == other.promotion_piece_type_ && rook_move_ == other.rook_move_ && initial_castling_rights_ == other.initial_castling_rights_ && castling_rights_ == other.castling_rights_;
     }
     bool operator!=(const Move &other) const
     {
@@ -417,8 +412,6 @@ namespace chess
     friend std::ostream &operator<<(
         std::ostream &os, const Move &move);
     std::string PrettyStr() const;
-    // NOTE: This does not find discovered checks.
-    bool DeliversCheck(Board &board);
 
     std::string ToString() const;
 
@@ -432,10 +425,6 @@ namespace chess
     // Promotion
     PieceType promotion_piece_type_ = NO_PIECE; // 1
 
-    // En-passant
-    BoardLocation en_passant_location_; // 1
-    Piece en_passant_capture_;          // 1
-
     // For castling moves
     SimpleMove rook_move_; // 2
 
@@ -444,10 +433,6 @@ namespace chess
 
     // Castling rights after the move
     CastlingRights castling_rights_; // 1
-
-    // Cached check
-    // -1 means missing, 0/1 store check values
-    int8_t delivers_check_ = -1; // 1
   };
 
   enum GameResult
@@ -485,12 +470,6 @@ namespace chess
     Piece piece_;
   };
 
-  struct EnpassantInitialization
-  {
-    // Indexed by PlayerColor
-    std::array<std::optional<Move>, 4> enp_moves = {std::nullopt, std::nullopt, std::nullopt, std::nullopt};
-  };
-
   struct MoveBuffer
   {
     Move *buffer = nullptr;
@@ -514,7 +493,6 @@ namespace chess
     Player turn;
     std::vector<std::vector<chess::PlacedPiece>> pieces;
     std::array<CastlingRights, 4> castlingRights;
-    EnpassantInitialization enpassantInitialization;
     std::unordered_map<PlayerColor, std::vector<BoardLocation>> attackedSquares;
   };
 
@@ -530,9 +508,7 @@ namespace chess
     Board(
         Player turn,
         std::unordered_map<BoardLocation, Piece> location_to_piece,
-        std::optional<std::unordered_map<Player, CastlingRights>>
-            castling_rights = std::nullopt,
-        std::optional<EnpassantInitialization> enp = std::nullopt);
+        std::optional<std::unordered_map<Player, CastlingRights>> castling_rights = std::nullopt);
 
     Board(const Board &other);
 
@@ -550,14 +526,9 @@ namespace chess
       return result;
     }
 
-    const EnpassantInitialization GetEnpassantInitialization() const
-    {
-      return enp_;
-    }
-
     const Piece GetLocationToPiece(int x, int y) const
     {
-      if (x >= 0 && x < 14 && y >= 0 && y < 14)
+      if (x >= 0 && x < rows_ && y >= 0 && y < cols_)
       {
         return location_to_piece_[x][y];
       }
@@ -575,7 +546,7 @@ namespace chess
 
     const BoardLocation GetBoardLocation(int x, int y) const
     {
-      if (x >= 0 && x < 14 && y >= 0 && y < 14)
+      if (x >= 0 && x < rows_ && y >= 0 && y < cols_)
       {
         return locations_[x][y];
       }
@@ -584,6 +555,7 @@ namespace chess
 
     GameResult CheckWasLastMoveKingCapture() const;
     GameResult GetGameResult(std::optional<Player> opt_player = std::nullopt); // Avoid calling during search.
+    int CalculateHeuristic(Team team) const;
 
     Team TeamToPlay() const;
     const Player &GetTurn() const { return turn_; }
@@ -620,10 +592,8 @@ namespace chess
         const BoardLocation &move_to,
         Team attacking_team) const;
 
-    // int64_t HashKey() const { return hash_key_; }
     int64_t HashKey() const { return 0; }
 
-    static std::shared_ptr<Board> CreateStandardSetup();
     //  bool operator==(const Board& other) const;
     //  bool operator!=(const Board& other) const;
     const CastlingRights &GetCastlingRights(const Player &player);
@@ -674,27 +644,32 @@ namespace chess
     void MakeNullMove();
     void UndoNullMove();
 
-    bool IsLegalLocation(int row, int col) const
+    static bool IsLegalLocation(int row, int col)
     {
-      if (row < 0 || row > GetMaxRow() || col < 0 || col > GetMaxCol() || (row < 3 && (col < 3 || col > 10)) || (row > 10 && (col < 3 || col > 10)))
+      if (row < 0 || row > GetMaxRow() || col < 0 || col > GetMaxCol() || (row < invalid_area && (col < invalid_area || col > GetMaxCol() - invalid_area)) || (row > GetMaxRow() - invalid_area && (col < invalid_area || col > GetMaxCol() - invalid_area)))
       {
         return false;
       }
       return true;
     }
-    bool IsLegalLocation(const BoardLocation &location) const
+
+    static bool IsLegalLocation(const BoardLocation &location)
     {
       return IsLegalLocation(location.GetRow(), location.GetCol());
     }
-    const EnpassantInitialization &GetEnpassantInitialization() { return enp_; }
+
     const std::vector<std::vector<PlacedPiece>> &GetPieceList() { return piece_list_; };
 
     inline void SetPiece(const BoardLocation &location,
                          const Piece &piece);
 
+    static int nRows() { return rows_; }
+    static int nCols() { return cols_; }
+    static int invalidArea() { return invalid_area; }
+
   protected:
-    int GetMaxRow() const { return 13; }
-    int GetMaxCol() const { return 13; }
+    static int GetMaxCol() { return cols_ - 1; }
+    static int GetMaxRow() { return rows_ - 1; }
     std::optional<CastlingType> GetRookLocationType(
         const Player &player, const BoardLocation &location) const;
     inline void RemovePiece(const BoardLocation &location);
@@ -720,24 +695,14 @@ namespace chess
 
     Player turn_;
 
-    Piece location_to_piece_[14][14];
+    Piece location_to_piece_[rows_][cols_];
+    BoardLocation locations_[rows_][cols_];
     std::vector<std::vector<PlacedPiece>> piece_list_;
 
-    BoardLocation locations_[14][14];
-
     CastlingRights castling_rights_[4];
-    EnpassantInitialization enp_;
-    int max_moves_storage = 5;
+    int max_moves_storage = 1;
     std::vector<Move> moves_; // list of moves from beginning of game
-    std::vector<Move> move_buffer_;
-    int piece_evaluations_[6]; // one per piece type
-    int piece_evaluation_ = 0;
-    int player_piece_evaluations_[4] = {0, 0, 0, 0}; // one per player
-
-    int64_t hash_key_ = 0;
-    int64_t turn_hashes_[4];
     BoardLocation king_locations_[4];
-
     size_t move_buffer_size_ = 300;
   };
 
@@ -748,7 +713,6 @@ namespace chess
   Player GetNextPlayer(const Player &player);
   Player GetPreviousPlayer(const Player &player);
   Player GetPartner(const Player &player);
-
 } // namespace chess
 
 #endif // _BOARD_H_
