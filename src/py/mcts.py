@@ -1,86 +1,89 @@
 import numpy as np
 import torch
+
+from alphazero_cpp import Node, BoardPool, GameResult
 from line_profiler_pycharm import profile
 
-from node import Node
 
 class MCTS:
     def __init__(self, gameType, neural_net, args):
         self.gameType = gameType
         self.args = args
         self.neural_net = neural_net
+        self.board_pool = BoardPool(int(args["pool_size"]))
 
     @torch.no_grad()
-    def search(self, states, games, player):
-        encoded_states = self.gameType.get_encoded_states(states, self.neural_net.device)
-        flat_root_policy = self.get_root_policy(encoded_states)
-        root_policy = self.gameType.parse_actionspace(flat_root_policy, states[0].GetTurn())
-        self.initialize_games(games, states, root_policy, player)
+    @profile
+    def search(self, games):
+        def get_expandable_leaves(non_terminal_nodes):
+            expandable_leaves = []
+            for node in non_terminal_nodes[:]:
+                leaf = node.ChooseLeaf()
+                if leaf is None:
+                    non_terminal_nodes.remove(node)
+                else:
+                    expandable_leaves.append(leaf)
+            return expandable_leaves
 
-        for _ in range(self.args['num_searches']):
-            self.process_search_iteration(games)
+        root_nodes = []
+        for game in games:
+            root_node = Node(self.args["C"], game, visit_count=1)
+            game.SetRootNode(root_node)
+            root_nodes.append(root_node)
 
-    def get_root_policy(self, encoded_states):
-        root_policy, _ = self.neural_net(encoded_states)
-        root_policy = torch.softmax(root_policy, dim=1)
-        return self.add_dirichlet_noise(root_policy, self.neural_net.device)
+        non_terminal_root_nodes = root_nodes[:]
+
+        for _ in range(self.args["num_searches"]):
+            expandable_leaves = get_expandable_leaves(non_terminal_root_nodes)
+            self.step(expandable_leaves)
+
+        for l in root_nodes:
+            assert len(l.GetChildren()) > 0
+
+        return root_nodes
 
     def add_dirichlet_noise(self, policy, device):
-        dirichlet_alpha = self.args['dirichlet_alpha']
-        dirichlet_epsilon = self.args['dirichlet_epsilon']
+        dirichlet_alpha = self.args["dirichlet_alpha"]
+        dirichlet_epsilon = self.args["dirichlet_epsilon"]
         noise = torch.tensor(
-            np.random.dirichlet([dirichlet_alpha] * self.gameType.action_space_size, size=policy.shape[0]),
-            device=device, dtype=torch.float32)
+            np.random.dirichlet(
+                [dirichlet_alpha] * self.gameType.action_space_size,
+                size=policy.shape[0],
+            ),
+            device=device,
+            dtype=torch.float32,
+        )
         return (1 - dirichlet_epsilon) * policy + dirichlet_epsilon * noise
 
-    def initialize_games(self, games, states, root_policy, player):
-        legal_actions_masks = self.gameType.get_legal_actions_mask(states, self.neural_net.device)
-        game_policies = root_policy * legal_actions_masks
-        num_dims = tuple(range(1, len(self.gameType.state_space_dims) + 1))
-        game_policies /= torch.sum(game_policies, dim=num_dims, keepdim=True)
-
-        for i, game in enumerate(games):
-            game_policy = game_policies[i]
-            game.root = Node(self.gameType, self.args, states[i], player, visit_count=1)
-            game.root.expand(game_policy)
-
-    def process_search_iteration(self, games):
-        non_terminal_games = self.execute_search_steps(games)
-        if non_terminal_games:
-            self.update_with_neural_net_predictions(non_terminal_games)
-
-    def execute_search_steps(self, games):
-        """Steps through the games until a terminal state is reached. Returns the non-terminal games."""
-        return [game for game in games if self.step_through_game(game)]
-
-    def step_through_game(self, game):
-        node = game.root
-        while node.is_fully_expanded():
-            node = node.select_child()
-        is_terminal, terminal_value = self.gameType.get_terminated(node.state, node.turn)
-        if is_terminal:
-            node.backpropagate(terminal_value)
-            return False
-        else:
-            game.node = node
-            return True
-
     @profile
-    def update_with_neural_net_predictions(self, games):
-        states = [game.node.state for game in games]
-        encoded_states = self.gameType.get_encoded_states(states, self.neural_net.device)
+    def step(self, leaves):
+        if len(leaves) == 0:
+            return
+
+        states = [leave.GetState() for leave in leaves]
+
+        encoded_states = self.gameType.GetEncodedStates(states, str(self.neural_net.device))
         flat_policy, value = self.neural_net(encoded_states)
         flat_policy = torch.softmax(flat_policy, dim=1)
 
-        policy = self.gameType.parse_actionspace(flat_policy, states[0].GetTurn())
+        policy = self.gameType.ParseActionspace(flat_policy, states[0].GetTurn())
 
-        valid_moves_mask = self.gameType.get_legal_actions_mask(states, self.neural_net.device)
-        policy *= valid_moves_mask
+        valid_moves_mask = self.gameType.get_legal_moves_mask(
+            states, str(self.neural_net.device)
+        )
+        policy *= valid_moves_mask#[: len(states)]
         num_dims = tuple(range(1, len(self.gameType.state_space_dims) + 1))
         policy = policy / torch.sum(policy, dim=num_dims, keepdim=True)
 
-        for i, game in enumerate(games):
-            node = game.node
-            node.expand(policy[i])
-            node.backpropagate(value[i])
+        Node.BackpropagateNodes(leaves, value.squeeze(1))
+        self.expand(leaves, policy)
 
+    @profile
+    def expand(self, leaves, policy_batch):
+        policy_batch_cpu = policy_batch.cpu()
+        non_zero_indices_batch = torch.nonzero(policy_batch).tolist()
+
+        non_zero_indices = torch.nonzero(policy_batch_cpu, as_tuple=True)
+        non_zero_values = policy_batch_cpu[non_zero_indices].tolist()
+
+        Node.ExpandNodes(leaves, policy_batch_cpu, non_zero_indices_batch, non_zero_values, self.board_pool)

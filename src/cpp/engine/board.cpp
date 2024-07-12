@@ -20,47 +20,19 @@ namespace chess
   BoardLocation BoardLocation::kNoLocation = BoardLocation();
   CastlingRights CastlingRights::kMissingRights = CastlingRights();
 
-  const BoardLocation kRedInitialRookLocationKingside(13, 10);
-  const BoardLocation kRedInitialRookLocationQueenside(13, 3);
-  const BoardLocation kBlueInitialRookLocationKingside(10, 0);
-  const BoardLocation kBlueInitialRookLocationQueenside(3, 0);
-  const BoardLocation kYellowInitialRookLocationKingside(0, 3);
-  const BoardLocation kYellowInitialRookLocationQueenside(0, 10);
-  const BoardLocation kGreenInitialRookLocationKingside(3, 13);
-  const BoardLocation kGreenInitialRookLocationQueenside(10, 13);
+  const BoardLocation kRedInitialRookLocationKingside(rows_ - 1, rows_ - 4);
+  const BoardLocation kRedInitialRookLocationQueenside(rows_ - 1, invalid_area);
+  const BoardLocation kBlueInitialRookLocationKingside(rows_ - 4, 0);
+  const BoardLocation kBlueInitialRookLocationQueenside(invalid_area, 0);
+  const BoardLocation kYellowInitialRookLocationKingside(0, invalid_area);
+  const BoardLocation kYellowInitialRookLocationQueenside(0, cols_ - 4);
+  const BoardLocation kGreenInitialRookLocationKingside(invalid_area, cols_ - 1);
+  const BoardLocation kGreenInitialRookLocationQueenside(cols_ - 4, cols_ - 1);
 
   const Player kRedPlayer = Player(RED);
   const Player kBluePlayer = Player(BLUE);
   const Player kYellowPlayer = Player(YELLOW);
   const Player kGreenPlayer = Player(GREEN);
-
-  const Piece kRedPawn(kRedPlayer, PAWN);
-  const Piece kRedKnight(kRedPlayer, KNIGHT);
-  const Piece kRedBishop(kRedPlayer, BISHOP);
-  const Piece kRedRook(kRedPlayer, ROOK);
-  const Piece kRedQueen(kRedPlayer, QUEEN);
-  const Piece kRedKing(kRedPlayer, KING);
-
-  const Piece kBluePawn(kBluePlayer, PAWN);
-  const Piece kBlueKnight(kBluePlayer, KNIGHT);
-  const Piece kBlueBishop(kBluePlayer, BISHOP);
-  const Piece kBlueRook(kBluePlayer, ROOK);
-  const Piece kBlueQueen(kBluePlayer, QUEEN);
-  const Piece kBlueKing(kBluePlayer, KING);
-
-  const Piece kYellowPawn(kYellowPlayer, PAWN);
-  const Piece kYellowKnight(kYellowPlayer, KNIGHT);
-  const Piece kYellowBishop(kYellowPlayer, BISHOP);
-  const Piece kYellowRook(kYellowPlayer, ROOK);
-  const Piece kYellowQueen(kYellowPlayer, QUEEN);
-  const Piece kYellowKing(kYellowPlayer, KING);
-
-  const Piece kGreenPawn(kGreenPlayer, PAWN);
-  const Piece kGreenKnight(kGreenPlayer, KNIGHT);
-  const Piece kGreenBishop(kGreenPlayer, BISHOP);
-  const Piece kGreenRook(kGreenPlayer, ROOK);
-  const Piece kGreenQueen(kGreenPlayer, QUEEN);
-  const Piece kGreenKing(kGreenPlayer, KING);
 
   namespace
   {
@@ -83,10 +55,10 @@ namespace chess
     {
       bool is_promotion = false;
 
-      constexpr int kRedPromotionRow = 3;
-      constexpr int kYellowPromotionRow = 10;
-      constexpr int kBluePromotionCol = 10;
-      constexpr int kGreenPromotionCol = 3;
+      constexpr int kRedPromotionRow = rows_ / 4;
+      constexpr int kYellowPromotionRow = 3 * rows_ / 4;
+      constexpr int kBluePromotionCol = 3 * cols_ / 4;
+      constexpr int kGreenPromotionCol = cols_ / 4;
 
       switch (color)
       {
@@ -138,7 +110,7 @@ namespace chess
     {
     case RED:
       delta_rows = -1;
-      not_moved = from.GetRow() == 12;
+      not_moved = from.GetRow() == rows_ - 2;
       break;
     case BLUE:
       delta_cols = 1;
@@ -150,7 +122,7 @@ namespace chess
       break;
     case GREEN:
       delta_cols = -1;
-      not_moved = from.GetCol() == 12;
+      not_moved = from.GetCol() == rows_ - 2;
       break;
     default:
       assert(false);
@@ -176,50 +148,8 @@ namespace chess
           }
         }
       }
-      else
-      {
-
-        // En-passant
-        if (other_piece.GetPieceType() == PAWN && piece.GetTeam() != other_piece.GetTeam())
-        {
-
-          int n_turns = (4 + piece.GetColor() - other_piece.GetColor()) % 4;
-          const Move *other_player_move = nullptr;
-          if (n_turns > 0 && n_turns <= (int)moves_.size())
-          {
-            other_player_move = &moves_[moves_.size() - n_turns];
-          }
-          else if (n_turns < 4)
-          {
-            const auto &enp_move = enp_.enp_moves[other_piece.GetColor()];
-            if (enp_move.has_value())
-            {
-              other_player_move = &enp_move.value();
-            }
-          }
-
-          if (other_player_move != nullptr && other_player_move->To() == to
-              // TODO: Refactor this with 'enp' locations
-              && other_player_move->ManhattanDistance() == 2 && (other_player_move->From().GetRow() == other_player_move->To().GetRow() || other_player_move->From().GetCol() == other_player_move->To().GetCol()))
-          {
-            const BoardLocation &moved_from = other_player_move->From();
-            int delta_row = to.GetRow() - moved_from.GetRow();
-            int delta_col = to.GetCol() - moved_from.GetCol();
-            BoardLocation enpassant_to = moved_from.Relative(
-                delta_row / 2, delta_col / 2);
-            // there may be both en-passant and piece capture in the same move
-            auto existing = GetPiece(enpassant_to);
-            if (existing.Missing() || existing.GetTeam() != piece.GetTeam())
-            {
-              AddPawnMoves2(moves, from, enpassant_to, piece.GetColor(),
-                            existing, to, other_piece);
-            }
-          }
-        }
-      }
     }
 
-    // Non-enpassant capture
     bool check_cols = team == RED_YELLOW;
     int capture_row, capture_col;
     for (int incr = 0; incr < 2; ++incr)
@@ -255,7 +185,7 @@ namespace chess
     int delta_row, delta_col;
     for (int pos_row_sign = 0; pos_row_sign < 2; ++pos_row_sign)
     {
-      for (int abs_delta_row = 1; abs_delta_row < 3; ++abs_delta_row)
+      for (int abs_delta_row = 1; abs_delta_row < invalid_area; ++abs_delta_row)
       {
         delta_row = pos_row_sign > 0 ? abs_delta_row : -abs_delta_row;
         for (int pos_col_sign = 0; pos_col_sign < 2; ++pos_col_sign)
@@ -273,37 +203,6 @@ namespace chess
           }
         }
       }
-    }
-  }
-
-  void Board::AddMovesFromIncrMovement(
-      std::vector<Move> &moves,
-      const Piece &piece,
-      const BoardLocation &from,
-      int incr_row,
-      int incr_col,
-      CastlingRights initial_castling_rights,
-      CastlingRights castling_rights) const
-  {
-    BoardLocation to = from.Relative(incr_row, incr_col);
-    while (IsLegalLocation(to))
-    {
-      const auto capture = GetPiece(to);
-      if (capture.Missing())
-      {
-        moves.emplace_back(from, to, Piece::kNoPiece, initial_castling_rights,
-                           castling_rights);
-      }
-      else
-      {
-        if (capture.GetTeam() != piece.GetTeam())
-        {
-          moves.emplace_back(from, to, capture, initial_castling_rights,
-                             castling_rights);
-        }
-        break;
-      }
-      to = to.Relative(incr_row, incr_col);
     }
   }
 
@@ -730,7 +629,7 @@ namespace chess
         int col_incr = do_incr_row ? 0 : (pos_incr ? 1 : -1);
         int row = loc_row + row_incr;
         int col = loc_col + col_incr;
-        while (row >= 0 && row < 14 && col >= 0 && col < 14)
+        while (row >= 0 && row < rows_ && col >= 0 && col < cols_)
         {
           const auto piece = GetPiece(row, col);
           if (piece.Present())
@@ -798,12 +697,12 @@ namespace chess
     for (int pos_row = 0; pos_row < 2; ++pos_row)
     {
       int row = pos_row ? loc_row + 1 : loc_row - 1;
-      if (row >= 0 && row < 14)
+      if (row >= 0 && row < rows_)
       {
         for (int pos_col = 0; pos_col < 2; ++pos_col)
         {
           int col = pos_col ? loc_col + 1 : loc_col - 1;
-          if (col >= 0 && col < 14)
+          if (col >= 0 && col < cols_)
           {
             const auto piece = GetPiece(row, col);
             if (piece.Present() && piece.GetTeam() == team && piece.GetPieceType() == PAWN)
@@ -885,18 +784,6 @@ namespace chess
 
     // auto attackers = GetAttackers(team, location, /*return_early=*/true);
     // return attackers.size() > 0;
-  }
-
-  bool Board::IsOnPathBetween(
-      const BoardLocation &from,
-      const BoardLocation &to,
-      const BoardLocation &between) const
-  {
-    int delta_row = from.GetRow() - to.GetRow();
-    int delta_col = from.GetCol() - to.GetCol();
-    int delta_row_between = from.GetRow() - between.GetRow();
-    int delta_col_between = from.GetCol() - between.GetCol();
-    return delta_row * delta_col_between == delta_col * delta_row_between;
   }
 
   bool Board::DiscoversCheck(
@@ -1011,23 +898,30 @@ namespace chess
       return player.GetTeam() == RED_YELLOW ? WIN_BG : WIN_RY;
     }
 
-    size_t num_moves = GetPseudoLegalMoves2(move_buffer_2_, move_buffer_size_);
+    Move move_buffer[300];
+    size_t num_moves = GetPseudoLegalMoves2(move_buffer, move_buffer_size_);
+
     for (size_t i = 0; i < num_moves; i++)
     {
-      const auto &move = move_buffer_2_[i];
+      const auto &move = move_buffer[i];
       MakeMove(move);
+
+      bool legal = !IsKingInCheck(player);
       GameResult king_capture_result = CheckWasLastMoveKingCapture();
+
+      UndoMove();
+
+      if (!legal)
+      {
+        continue;
+      }
+
       if (king_capture_result != IN_PROGRESS)
       {
-        UndoMove();
         return king_capture_result;
       }
-      bool legal = !IsKingInCheck(player);
-      UndoMove();
-      if (legal)
-      {
-        return IN_PROGRESS;
-      }
+
+      return IN_PROGRESS;
     }
 
     if (!IsKingInCheck(player))
@@ -1087,7 +981,7 @@ namespace chess
     location_to_piece_[location.GetRow()][location.GetCol()] = piece;
     // Add to piece_list_
     piece_list_[piece.GetColor()].emplace_back(location, piece);
-    UpdatePieceHash(piece, location);
+    // UpdatePieceHash(piece, location);
     // Update king location
     if (piece.GetPieceType() == KING)
     {
@@ -1099,7 +993,7 @@ namespace chess
   {
     const auto piece = GetPiece(location);
     assert(piece.Present());
-    UpdatePieceHash(piece, location);
+    // UpdatePieceHash(piece, location);
     location_to_piece_[location.GetRow()][location.GetCol()] = Piece();
     auto &placed_pieces = piece_list_[piece.GetColor()];
     for (auto it = placed_pieces.begin(); it != placed_pieces.end();)
@@ -1119,17 +1013,17 @@ namespace chess
     }
   }
 
-  void Board::InitializeHash()
-  {
-    for (int color = 0; color < 4; color++)
-    {
-      for (const auto &placed_piece : piece_list_[color])
-      {
-        UpdatePieceHash(placed_piece.GetPiece(), placed_piece.GetLocation());
-      }
-    }
-    UpdateTurnHash(static_cast<int>(turn_.GetColor()));
-  }
+  // void Board::InitializeHash()
+  // {
+  //   for (int color = 0; color < 4; color++)
+  //   {
+  //     for (const auto &placed_piece : piece_list_[color])
+  //     {
+  //       UpdatePieceHash(placed_piece.GetPiece(), placed_piece.GetLocation());
+  //     }
+  //   }
+  //   UpdateTurnHash(static_cast<int>(turn_.GetColor()));
+  // }
 
   void Board::MakeMove(const Move &move)
   {
@@ -1142,23 +1036,6 @@ namespace chess
 
     const auto piece = GetPiece(move.From());
 
-    // TODO: refactor this -- it should account for the case where we both capture
-    // and en-passant capture.
-    const auto capture = move.GetCapturePiece();
-    if (capture.Present())
-    {
-      int value = piece_evaluations_[capture.GetPieceType()];
-      if (capture.GetTeam() == RED_YELLOW)
-      {
-        piece_evaluation_ -= value;
-      }
-      else
-      {
-        piece_evaluation_ += value;
-      }
-      player_piece_evaluations_[capture.GetColor()] -= value;
-    }
-
     // Capture
     const auto standard_capture = GetPiece(move.To());
     if (standard_capture.Present())
@@ -1168,17 +1045,13 @@ namespace chess
 
     if (piece.Missing())
     {
-      std::cout 
-          << "Error: piece missing for move: " << std::endl
-          << "move"
-          << " from: " << move.From()
-          << " to: " << move.To() << std::endl
-          << " turn: " << turn_
-          << std::endl;
-      std::cout << *this << std::endl;
-      abort();
+      std::ostringstream err_msg;
+      err_msg << "Error: piece missing for move: " << std::endl
+              << "from: " << move.From().PrettyStr()
+              << " to: " << move.To().PrettyStr() << std::endl
+              << " turn: " << turn_ << std::endl;
+      throw std::runtime_error(err_msg.str());
     }
-    assert(piece.Present());
 
     RemovePiece(move.From());
     const auto promotion_piece_type = move.GetPromotionPieceType();
@@ -1193,38 +1066,33 @@ namespace chess
       SetPiece(move.To(), piece);
     }
 
-    // En-passant
-    const auto enpassant_location = move.GetEnpassantLocation();
-    if (enpassant_location.Present())
+    // Castling
+    const auto rook_move = move.GetRookMove();
+    if (rook_move.Present())
     {
-      RemovePiece(enpassant_location);
+      const auto rook = GetPiece(rook_move.From());
+      assert(rook.Present());
+      RemovePiece(rook_move.From());
+      SetPiece(rook_move.To(), rook);
     }
-    else
-    {
-      // Castling
-      const auto rook_move = move.GetRookMove();
-      if (rook_move.Present())
-      {
-        const auto rook = GetPiece(rook_move.From());
-        assert(rook.Present());
-        RemovePiece(rook_move.From());
-        SetPiece(rook_move.To(), rook);
-      }
 
-      // Castling: rights update
-      const auto castling_rights = move.GetCastlingRights();
-      if (castling_rights.Present())
-      {
-        castling_rights_[turn_.GetColor()] = castling_rights;
-      }
+    // Castling: rights update
+    const auto castling_rights = move.GetCastlingRights();
+    if (castling_rights.Present())
+    {
+      castling_rights_[turn_.GetColor()] = castling_rights;
     }
 
     int t = static_cast<int>(turn_.GetColor());
-    UpdateTurnHash(t);
-    UpdateTurnHash((t + 1) % 4);
 
     turn_ = GetNextPlayer(turn_);
     moves_.push_back(move);
+
+    if (moves_.size() > max_moves_storage)
+    {
+      // Remove the oldest move
+      moves_.erase(moves_.begin());
+    }
   }
 
   void Board::UndoMove()
@@ -1264,23 +1132,6 @@ namespace chess
       SetPiece(from, piece);
     }
 
-    // TODO: refactor this -- it should account for the case where we both capture
-    // and en-passant capture.
-    const auto capture = move.GetCapturePiece();
-    if (capture.Present())
-    {
-      int value = piece_evaluations_[capture.GetPieceType()];
-      if (capture.GetTeam() == RED_YELLOW)
-      {
-        piece_evaluation_ += value;
-      }
-      else
-      {
-        piece_evaluation_ -= value;
-      }
-      player_piece_evaluations_[capture.GetColor()] += value;
-    }
-
     // Place back captured pieces
     const auto standard_capture = move.GetStandardCapture();
     if (standard_capture.Present())
@@ -1288,36 +1139,24 @@ namespace chess
       SetPiece(to, standard_capture);
     }
 
-    // Place back en-passant pawns
-    const auto enpassant_location = move.GetEnpassantLocation();
-    if (enpassant_location.Present())
+    // Castling: rook move
+    const auto rook_move = move.GetRookMove();
+    if (rook_move.Present())
     {
-      SetPiece(enpassant_location,
-               move.GetEnpassantCapture());
+      RemovePiece(rook_move.To());
+      SetPiece(rook_move.From(), Piece(turn_before.GetColor(), ROOK));
     }
-    else
-    {
-      // Castling: rook move
-      const auto rook_move = move.GetRookMove();
-      if (rook_move.Present())
-      {
-        RemovePiece(rook_move.To());
-        SetPiece(rook_move.From(), Piece(turn_before.GetColor(), ROOK));
-      }
 
-      // Castling: rights update
-      const auto initial_castling_rights = move.GetInitialCastlingRights();
-      if (initial_castling_rights.Present())
-      {
-        castling_rights_[turn_before.GetColor()] = initial_castling_rights;
-      }
+    // Castling: rights update
+    const auto initial_castling_rights = move.GetInitialCastlingRights();
+    if (initial_castling_rights.Present())
+    {
+      castling_rights_[turn_before.GetColor()] = initial_castling_rights;
     }
 
     turn_ = turn_before;
     moves_.pop_back();
     int t = static_cast<int>(turn_.GetColor());
-    UpdateTurnHash(t);
-    UpdateTurnHash((t + 1) % 4);
   }
 
   BoardLocation Board::GetKingLocation(PlayerColor color) const
@@ -1330,82 +1169,12 @@ namespace chess
     return GetTeam(GetTurn().GetColor());
   }
 
-  int Board::PieceEvaluation() const
-  {
-    return piece_evaluation_;
-  }
-
-  int Board::PieceEvaluation(PlayerColor color) const
-  {
-    return player_piece_evaluations_[color];
-  }
-
-  int Board::MobilityEvaluation(const Player &player)
-  {
-    Player turn = turn_;
-    turn_ = player;
-    int mobility = 0;
-    size_t num_moves = GetPseudoLegalMoves2(move_buffer_2_, move_buffer_size_);
-    int player_mobility = (int)num_moves;
-
-    if (player.GetTeam() == RED_YELLOW)
-    {
-      mobility += player_mobility;
-    }
-    else
-    {
-      mobility -= player_mobility;
-    }
-
-    mobility *= kMobilityMultiplier;
-
-    turn_ = turn;
-    return mobility;
-  }
-
-  int Board::MobilityEvaluation()
-  {
-    Player turn = turn_;
-
-    int mobility = 0;
-    for (int player_color = 0; player_color < 4; ++player_color)
-    {
-      turn_ = Player(static_cast<PlayerColor>(player_color));
-      size_t num_moves = GetPseudoLegalMoves2(move_buffer_2_, move_buffer_size_);
-      int player_mobility = (int)num_moves;
-
-      if (turn_.GetTeam() == RED_YELLOW)
-      {
-        mobility += player_mobility;
-      }
-      else
-      {
-        mobility -= player_mobility;
-      }
-    }
-
-    mobility *= kMobilityMultiplier;
-
-    turn_ = turn;
-    return mobility;
-  }
-
   Board::Board(
       Player turn,
       std::unordered_map<BoardLocation, Piece> location_to_piece,
-      std::optional<std::unordered_map<Player, CastlingRights>> castling_rights,
-      std::optional<EnpassantInitialization> enp)
+      std::optional<std::unordered_map<Player, CastlingRights>> castling_rights)
       : turn_(std::move(turn))
   {
-
-    // In centipawns
-    piece_evaluations_[PAWN] = 50;
-    piece_evaluations_[KNIGHT] = 300;
-    piece_evaluations_[BISHOP] = 400;
-    piece_evaluations_[ROOK] = 500;
-    piece_evaluations_[QUEEN] = 1000;
-    piece_evaluations_[KING] = 10000;
-
     for (int color = 0; color < 4; color++)
     {
       castling_rights_[color] = CastlingRights(false, false);
@@ -1420,15 +1189,10 @@ namespace chess
         }
       }
     }
-    if (enp.has_value())
-    {
-      enp_ = std::move(enp.value());
-    }
-    move_buffer_.reserve(1000);
 
-    for (int i = 0; i < 14; ++i)
+    for (int i = 0; i < rows_; ++i)
     {
-      for (int j = 0; j < 14; ++j)
+      for (int j = 0; j < cols_; ++j)
       {
         locations_[i][j] = BoardLocation(i, j);
         location_to_piece_[i][j] = Piece();
@@ -1452,15 +1216,6 @@ namespace chess
           locations_[location.GetRow()][location.GetCol()],
           piece));
       PieceType piece_type = piece.GetPieceType();
-      if (piece.GetTeam() == RED_YELLOW)
-      {
-        piece_evaluation_ += piece_evaluations_[static_cast<int>(piece_type)];
-      }
-      else
-      {
-        piece_evaluation_ -= piece_evaluations_[static_cast<int>(piece_type)];
-      }
-      player_piece_evaluations_[piece.GetColor()] += piece_evaluations_[piece_type];
       if (piece.GetPieceType() == KING)
       {
         king_locations_[color] = location;
@@ -1490,28 +1245,50 @@ namespace chess
     {
       std::sort(placed_pieces.begin(), placed_pieces.end(), customLess);
     }
+  }
 
-    // Initialize hashes for each piece at each location, and each turn
-    std::srand(958829);
-    for (int color = 0; color < 4; color++)
+  Board::Board(const Board &other)
+      : turn_(other.turn_),
+        moves_(other.moves_),
+        move_buffer_size_(other.move_buffer_size_)
+  {
+    // Perform copying
+    std::copy(&other.location_to_piece_[0][0], &other.location_to_piece_[0][0] + rows_ * cols_, &location_to_piece_[0][0]);
+    piece_list_ = other.piece_list_;
+    std::copy(&other.locations_[0][0], &other.locations_[0][0] + rows_ * cols_, &locations_[0][0]);
+    std::copy(std::begin(other.castling_rights_), std::end(other.castling_rights_), std::begin(castling_rights_));
+    std::copy(std::begin(other.king_locations_), std::end(other.king_locations_), std::begin(king_locations_));
+  }
+
+  int Board::CalculateHeuristic(Team team) const
+  {
+    constexpr int piece_values[kNumPieceTypes] = {1, 3, 3, 5, 9};
+
+    int heuristic_value = 0;
+    for (const auto &row : piece_list_)
     {
-      turn_hashes_[color] = rand64();
-    }
-    for (int color = 0; color < 4; color++)
-    {
-      for (int piece_type = 0; piece_type < 6; piece_type++)
+      for (const auto &placed_piece : row)
       {
-        for (int row = 0; row < 14; row++)
+        if (placed_piece.GetPiece().Present())
         {
-          for (int col = 0; col < 14; col++)
+          PieceType piece_type = placed_piece.GetPiece().GetPieceType();
+
+          if (piece_type == KING)
+            continue;
+
+          int piece_value = piece_values[piece_type];
+          if (placed_piece.GetPiece().GetTeam() == team)
           {
-            piece_hashes_[color][piece_type][row][col] = rand64();
+            heuristic_value += piece_value;
+          }
+          else
+          {
+            heuristic_value -= piece_value;
           }
         }
       }
     }
-
-    InitializeHash();
+    return heuristic_value;
   }
 
   inline Team GetTeam(PlayerColor color)
@@ -1565,75 +1342,6 @@ namespace chess
     default:
       return kYellowPlayer;
     }
-  }
-
-  std::shared_ptr<Board> Board::CreateStandardSetup()
-  {
-    std::unordered_map<BoardLocation, Piece> location_to_piece;
-    std::unordered_map<Player, CastlingRights> castling_rights;
-
-    std::vector<PieceType> piece_types = {
-        ROOK,
-        KNIGHT,
-        BISHOP,
-        QUEEN,
-        KING,
-        BISHOP,
-        KNIGHT,
-        ROOK,
-    };
-    std::vector<PlayerColor> player_colors = {RED, BLUE, YELLOW, GREEN};
-
-    for (const PlayerColor &color : player_colors)
-    {
-      Player player(color);
-      castling_rights[player] = CastlingRights(true, true);
-
-      BoardLocation piece_location;
-      int delta_row = 0;
-      int delta_col = 0;
-      int pawn_offset_row = 0;
-      int pawn_offset_col = 0;
-
-      switch (color)
-      {
-      case RED:
-        piece_location = BoardLocation(13, 3);
-        delta_col = 1;
-        pawn_offset_row = -1;
-        break;
-      case BLUE:
-        piece_location = BoardLocation(3, 0);
-        delta_row = 1;
-        pawn_offset_col = 1;
-        break;
-      case YELLOW:
-        piece_location = BoardLocation(0, 10);
-        delta_col = -1;
-        pawn_offset_row = 1;
-        break;
-      case GREEN:
-        piece_location = BoardLocation(10, 13);
-        delta_row = -1;
-        pawn_offset_col = -1;
-        break;
-      default:
-        assert(false);
-        break;
-      }
-
-      for (const PieceType piece_type : piece_types)
-      {
-        BoardLocation pawn_location = piece_location.Relative(
-            pawn_offset_row, pawn_offset_col);
-        location_to_piece[piece_location] = Piece(player.GetColor(), piece_type);
-        location_to_piece[pawn_location] = Piece(player.GetColor(), PAWN);
-        piece_location = piece_location.Relative(delta_row, delta_col);
-      }
-    }
-
-    return std::make_shared<Board>(
-        Player(RED), std::move(location_to_piece), std::move(castling_rights));
   }
 
   int Move::ManhattanDistance() const
@@ -1714,44 +1422,47 @@ namespace chess
 
   std::ostream &operator<<(std::ostream &os, const Move &move)
   {
-    os << "Move(" << move.From() << " -> " << move.To() << ")";
+    os << "Move(" << move.From().PrettyStr() << " -> " << move.To().PrettyStr() << ")";
     return os;
   }
 
-  std::ostream &operator<<(
-      std::ostream &os, const Board &board)
+  std::ostream &operator<<(std::ostream &os, const Board &board)
   {
-    for (int i = 0; i < 14; i++)
+    for (int i = 0; i < rows_; i++)
     {
-      for (int j = 0; j < 14; j++)
+      os << (rows_ - i < 9 ? " " : "") << rows_ - i + 1 << ":";
+      for (int j = 0; j < cols_; j++)
       {
+        const auto piece = board.location_to_piece_[i][j];
         if (board.IsLegalLocation(BoardLocation(i, j)))
         {
-          const auto piece = board.location_to_piece_[i][j];
           if (piece.Missing())
           {
-            os << ".";
+            os << " . ";
           }
           else
           {
-            os << ToStr(piece.GetPieceType());
+            // os << ' ' << ToStr(piece.GetPieceType()) << ' ';
+            os << static_cast<int>(piece.GetColor()) << ToStr(piece.GetPieceType()) << ' ';
           }
         }
         else
         {
-          os << " ";
+          os << "   ";
         }
       }
       os << std::endl;
     }
 
-    os << "Turn: " << board.turn_ << std::endl;
-
-    os << "All moves: " << std::endl;
-    for (const auto &move : board.moves_)
+    // Column labels at the bottom, from 'a' to 'n'
+    os << "   "; // Align with the row labels
+    for (int j = 0; j < cols_; j++)
     {
-      os << move << std::endl;
+      os << " " << char('a' + j) << " ";
     }
+    os << std::endl;
+
+    os << "Turn: " << board.turn_ << std::endl;
     return os;
   }
 
@@ -1821,8 +1532,8 @@ namespace chess
   {
     std::string s;
     s += ('a' + GetCol());
-    s += std::to_string(14 - GetRow());
-    return s;
+    s += std::to_string(rows_ - GetRow());
+    return s + " (" + std::to_string(GetRow()) + ", " + std::to_string(GetCol()) + ")";
   }
 
   std::string Move::PrettyStr() const
@@ -1886,8 +1597,8 @@ namespace chess
   void Board::MakeNullMove()
   {
     int t = static_cast<int>(turn_.GetColor());
-    UpdateTurnHash(t);
-    UpdateTurnHash((t + 1) % 4);
+    // UpdateTurnHash(t);
+    // UpdateTurnHash((t + 1) % 4);
 
     turn_ = GetNextPlayer(turn_);
   }
@@ -1897,17 +1608,6 @@ namespace chess
     turn_ = GetPreviousPlayer(turn_);
 
     int t = static_cast<int>(turn_.GetColor());
-    UpdateTurnHash(t);
-    UpdateTurnHash((t + 1) % 4);
-  }
-
-  bool Move::DeliversCheck(Board &board)
-  {
-    if (delivers_check_ < 0)
-    {
-      delivers_check_ = board.DeliversCheck(*this);
-    }
-    return delivers_check_;
   }
 
 } // namespace chess

@@ -1,6 +1,5 @@
 from typing import List, Optional, Tuple
-from chessenv import *
-
+from alphazero_cpp import *
 
 def split_str_on_whitespace(x: str) -> List[str]:
     return x.split()
@@ -79,7 +78,7 @@ def parse_promotion(move_str: str, start: int) -> Optional[Tuple[int, str]]:
     else:
         return None
 
-def parse_move(board: 'Board', move_str: str, board_size: str) -> Optional['Move']:
+def parse_move(board: 'Board', move_str: str, board_size: str):
     from_location = parse_location(move_str, 0, board_size)
     if not from_location:
         return None
@@ -100,10 +99,10 @@ def parse_move(board: 'Board', move_str: str, board_size: str) -> Optional['Move
             return move
     return None
 
-def parse_board_from_fen(fen: str, board_size: int) -> Optional['Board']:
+from typing import Optional
+
+def parse_board_args_from_fen(fen: str, board_size: int):
     parts = split_str(fen, "-")
-    if len(parts) < 7 or len(parts) > 8:
-        return None
 
     player_str = parts[0]
     castling_availability_kingside = parts[2]
@@ -114,7 +113,7 @@ def parse_board_from_fen(fen: str, board_size: int) -> Optional['Board']:
 
     # Parse player
     if len(player_str) != 1:
-        return None
+        raise ValueError("Player string must be a single character")
     pchar = player_str[0]
     if pchar == 'R':
         player = Player(RED)
@@ -125,57 +124,35 @@ def parse_board_from_fen(fen: str, board_size: int) -> Optional['Board']:
     elif pchar == 'G':
         player = Player(GREEN)
     else:
-        return None
+        raise ValueError("Invalid player character in FEN string")
 
     # Parse castling availability
     kingside = parse_castling_availability(castling_availability_kingside)
     if not kingside:
-        return None
+        raise ValueError("Invalid kingside castling availability in FEN string")
     queenside = parse_castling_availability(castling_availability_queenside)
     if not queenside:
-        return None
+        raise ValueError("Invalid queenside castling availability in FEN string")
 
     castling_rights = {}
     for player_color in range(4):
         pl = Player(PlayerColor(player_color))
         castling_rights[pl.GetColor()] = CastlingRights(kingside[player_color], queenside[player_color])
 
-    # Parse enpassant
-    enp = EnpassantInitialization()
-    if enpassant:
-        parts = split_str(enpassant[1:-1], ",")
-        if len(parts) != 4:
-            return None
-        for i in range(4):
-            enp_location = parse_enp_location(parts[i], board_size)
-            if enp_location:
-                to = enp_location
-                from_row, from_col = to.get_row(), to.get_col()
-                if i == RED:
-                    from_row += 2
-                elif i == BLUE:
-                    from_col -= 2
-                elif i == YELLOW:
-                    from_row -= 2
-                elif i == GREEN:
-                    from_col += 2
-                enp.enp_moves[i] = Move(BoardLocation(from_row, from_col), to)
-
     # Parse piece placement
     rows = split_str(piece_placement, "/")
-    if len(rows) != board_size:
-        return None
+
     location_to_piece = {}
     for row in range(len(rows)):
         cols = split_str(rows[row], ",")
         col = 0
         for col_str in cols:
             if not col_str:
-                return None
+                raise ValueError("Empty column string in piece placement")
             ch = col_str[0]
             if ch in ['r', 'b', 'y', 'g']:
                 if len(col_str) != 2:
-                    return None
+                    raise ValueError("Piece placement string for player must be of length 2")
                 location = BoardLocation(row, col)
                 player_color = {'r': RED, 'b': BLUE, 'y': YELLOW, 'g': GREEN}[ch]
                 piece_type = {'P': PAWN, 'R': ROOK, 'N': KNIGHT, 'B': BISHOP, 'K': KING, 'Q': QUEEN}[col_str[1]]
@@ -187,11 +164,8 @@ def parse_board_from_fen(fen: str, board_size: int) -> Optional['Board']:
             else:
                 num_empty = parse_int(col_str)
                 if not num_empty or num_empty <= 0:
-                    return None
+                    raise ValueError("Invalid number of empty spaces in piece placement")
                 col += num_empty
 
-    # board = Board(player, location_to_piece, castling_rights, enp)
-    # TODO: fix this castling_rights and enp inputs!!
-    board = Board(player, location_to_piece)
-    return board
+    return player, location_to_piece
 

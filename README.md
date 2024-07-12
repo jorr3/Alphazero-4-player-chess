@@ -22,7 +22,6 @@ that learns optimal strategies through self-play.
 
 This project builds upon the [4pchess](https://github.com/obryanlouis/4pchess) engine, incorporating modifications to
 support the AlphaZero framework, removing non-essential code, and implementing a Python binding instead of communicating
-via the command line. Most of the engine modifications are detailed
-in [added_board_methods.cc](./engine/added_board_methods.cc) and [wrapper.cc](./engine/wrapper.cc).
+via the command line.
 
 You can find the 4pchess repo [here](https://github.com/obryanlouis/4pchess).

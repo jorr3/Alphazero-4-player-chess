@@ -1,5 +1,6 @@
-from torch import nn
 import torch.nn.functional as F
+
+from torch import nn
 
 
 class ResNet(nn.Module):
@@ -22,7 +23,7 @@ class ResNet(nn.Module):
             nn.BatchNorm2d(gameType.num_action_channels),
             nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(gameType.action_space_size, gameType.num_action_channels * gameType.board_size ** 2),
+            nn.Linear(gameType.action_space_size, gameType.num_action_channels * gameType.nRows() * gameType.nCols()),
         )
 
         self.valueHead = nn.Sequential(
